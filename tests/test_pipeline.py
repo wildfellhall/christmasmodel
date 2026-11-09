@@ -91,7 +91,7 @@ def test_pasted_cell_bootstraps_with_inline_arguments_without_file(tmp_path, mon
     monkeypatch.setattr(sys, "argv", ["ipykernel_launcher", "-f", "kernel.json"])
     namespace["run_notebook"]()
     assert calls[0][1:5] == ["-m", "pip", "install", "-q"]
-    assert calls[1] == ["compare-capacity", "--output-dir", "runs/christmas-capacity"]
+    assert calls[1] == ["finetune-scenes", "--output-dir", "runs/christmas-scenes"]
 
 
 def test_capacity_counts_amp_skips_and_discards_unsaved_attempts(tiny_model, tmp_path):

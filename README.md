@@ -1,14 +1,90 @@
 # Christmasmodel
 
-Train literary continuation models **from random weights** on the original Christmas and winter books. The pasted-cell default in [model.py](model.py) runs a fresh **14M versus 42M comparison**, with a frozen prose benchmark and no test-set evaluation. The original single-model workflow remains available through the train command. [export.py](export.py) saves a Hugging Face package and converts weights to GGUF.
+Train literary continuation models **from random weights** on the original Christmas and winter books. The pasted-cell default in [model.py](model.py) now runs **option 1: scene-focused fine-tuning of the existing 14M model**, with a continuation control and frozen prose review. Fresh training and the earlier capacity comparison remain available. [export.py](export.py) saves a Hugging Face package and converts weights to GGUF.
 
 **The original Christmas source list is a hard constraint.** Training uses only these books. No supplementary corpus, externally generated training stories, or pretrained weights are used. Source-list overrides are limited to subsets of the original URLs.
 
-## Fresh capacity comparison: current experiment
+## Option 1: scene-focused fine-tuning
 
-**The pasted-cell default is now a fresh 14M versus 42M comparison.** Both models start from random weights and train on the same Christmas books. The uploaded checkpoint is not loaded. The experiment tests capacity under a shared recipe; it does not claim that 42M will be sufficient or that either model's optimal hyperparameters have been found.
+The completed capacity experiment did not demonstrate sustained coherence. Its 42M branch overfit substantially. This bounded pilot changes the training examples and supervision, while retaining the original Christmas corpus, tokenizer, architecture, and source dropout. It is an experiment, not a promised coherence fix.
 
-Copy all of [model.py](model.py) into one Colab GPU cell. Its source list, installation bootstrap, cleaning, tokenizer training, training loop, and evaluation code are inline. The default near the top is:
+**Copy the entire updated `model.py` into one Colab GPU cell.** All 189 source URLs and required code remain inline; no repository clone or helper module is needed. The cell installs pinned dependencies. The defaults near the top are:
+
+```python
+NOTEBOOK_ARGS = ["finetune-scenes", "--output-dir", "runs/christmas-scenes"]
+```
+
+This expects the source model at `runs/christmas-capacity/14m/best` and its original prepared corpus at `data/`, relative to the notebook's working directory. For the reported run, that source is the best 14M model selected at step 7,750. **The reports ZIP does not contain weights or prepared data.** Keep or restore both from the original training session; this command will not rebuild the corpus or download a pretrained replacement.
+
+For explicit Colab paths, edit the arguments before running the same complete cell:
+
+```python
+NOTEBOOK_ARGS = [
+    "finetune-scenes",
+    "--continue-from", "/content/runs/christmas-capacity/14m/best",
+    "--data-dir", "/content/data",
+    "--output-dir", "/content/runs/christmas-scenes",
+]
+```
+
+Use mounted Drive paths for persistence. The command verifies the source's dataset fingerprint and tokenizer, then saves an unchanged starting snapshot. A different prepared corpus, even with similar text, is rejected.
+
+| Decision | Default and rationale |
+| --- | --- |
+| Source | Existing 6-layer, width-384, 6-head GPT-2; 512-token context. Reuses the learned vocabulary and language patterns. |
+| Excerpts | Exact contiguous **192–448-token** training-book slices, starting and ending at paragraph boundaries; at least four detected sentences. No rewriting, outside text, or validation/test passages enter the training pool. |
+| Selection | Prefer shorter sentences, fewer rare words, and fewer capitalized-name proxies; reject obvious headings, verse, and unanchored openings. Keep at most 16 nonoverlapping excerpts per book and remove exact duplicate passages. These are surface heuristics, not semantic certification. |
+| Prefix supervision | Choose an original sentence boundary at **48–128 tokens**, preferably near 96, leaving at least 64 continuation tokens. Prefix tokens remain visible to attention but their labels are `-100`; the original continuation is supervised normally. |
+| Mixture | **50% scene examples / 50% original windows per mixture epoch.** Every original replay window occurs once per epoch. This is an example ratio, not a token-loss ratio; masked prefixes and shorter excerpts reduce the scene share of scored targets. Both counts are reported. |
+| Endings | Automatic paragraph cuts receive **no invented EOS target**. Original book endings retain EOS. A reviewed CSV can explicitly mark a natural scene ending for EOS supervision. |
+| Optimizer | Fresh AdamW, peak **5e-5**, betas `(0.9, 0.95)`, epsilon `1e-8`, weight decay `0.1`, gradient clipping `1.0`. The peak is one sixth of the original training peak to limit disruption during specialization. Dropout is inherited. |
+| Budget | **1,000 updates per branch**, batch 8 × accumulation 4. 3% warmup, cosine decay to 5e-6. Both branches run the fixed budget; these are starting settings, not tuned optima. |
+| Control | Ordinary continuation from exactly the same starting weights, learning rate, and update budget. The scene branch tests the complete data/supervision intervention. Compute and scored-target counts are **not matched**. |
+| Checkpoints | Validation, console samples, full prose review, and retained review weights every **250 updates**, plus the final partial interval. Standard optimizer checkpoints keep the best and recent checkpoints for resume. |
+| Selection | `best/` is chosen by full-validation token NLL, with the unchanged source also eligible. Every periodic review retains weights so a better-writing checkpoint can be selected independently. No automatic coherence winner. |
+
+The local original-corpus extraction produced 2,255 candidates across 163 training books, containing 556,905 excerpt tokens. These are candidate counts, not a claim that every passage is a complete simple scene. Actual counts are printed for your prepared data. A real pilot requires at least 128 selected passages to avoid silently running on a tiny repeated subset.
+
+### Inspect or curate the excerpts
+
+`--plan-only` prepares `scene_candidates.csv`, `scene_selection.json`, the frozen benchmark, and an unchanged source snapshot without training. Add `--resume` to execute that saved plan unchanged.
+
+For manual curation, copy `scene_candidates.csv`, set `include` to `0` for passages to omit, and mark `natural_end=1` only where the excerpt provides a reasonable stopping point. Leave source text, token boundaries, IDs, and hashes unchanged. Start a **new** output directory with `--scene-review` pointing to the edited CSV. Only selected training-book slices can enter the dataset; edits to source content are rejected. The original script runs automatically without a reviewed CSV and labels that selection honestly as heuristic candidates.
+
+### Resume, compare prose, and export
+
+After a disconnect, rerun the full cell with the same settings, **replace `--continue-from` and its path with `--resume`**, and retain the same data/output directories. The saved starting snapshot makes the original source directory unnecessary for resumption. Dataset, initial weights, settings, selection annotations, and benchmark are checked against the frozen plan. Completed branches are reused. A completed final optimizer checkpoint can be finalized without another update.
+
+The output directory contains:
+
+- `comparison.json`: baseline and selected validation scores, exact target exposure, skipped optimizer steps, and paths. `coherence_winner` remains `null` for review.
+- `control/initial/`: unchanged baseline prose, validation NLL, and fixed training-subset NLL.
+- `control/best/` and `scenes/best/`: model/tokenizer packages selected by validation loss; these may retain the original model if no new checkpoint improves NLL.
+- `scenes/reviews/step-250/model/`, etc.: retained, exportable weights even if validation NLL worsened.
+- `blind_best_full.csv` and `blind_final_full.csv`: shuffled, opaque-label comparisons of the unchanged baseline, continuation control, and scene branch on the same 20 validation prefixes and two sampling seeds.
+- `blind_best_short.csv` and `blind_final_short.csv`: the first 96 tokens of those same 192-token outputs. These are correlated views, not additional independent samples.
+- `review_key.json`: reveals branch/checkpoint identities after prose review. Existing blind-review ratings are preserved on resume.
+
+Rate grammar, character/scene continuity, connected events, and repetition. Exact training-copy spans of at least 32 generated tokens are reported; zero detected matches does not establish novelty. The full validation-book split stays unchanged, and the test set is not evaluated. Console samples include greedy and sampled generation; full reviews use the existing temperature 0.8, top-p 0.92, top-k 40, repetition penalty 1.08, without phrase blocking.
+
+For a tiny **execution check**, use `--smoke-test --output-dir runs/scenes-smoke`. This creates a tiny random model on the existing prepared data and runs three CPU updates per branch. It does not load or assess the quality of the 14M source.
+
+The existing exporter accepts either `scenes/best` or any retained review's `model/` directory. For example, from a repository checkout:
+
+```python
+%pip install -q -r requirements-export.txt
+%run export.py --model-dir runs/christmas-scenes/scenes/best --output-dir exports/scenes --setup --outtype f16 --verify --download
+```
+
+Use the existing `--repo-id` option when you explicitly want to upload an export to Hugging Face. Training itself neither uploads weights nor evaluates the test split.
+
+Implementation verification: 52 tests pass, including source-slice validation, prefix/padding/EOS target accounting, deterministic mixture exposure, exact resumed batches/weights, and recovery after the final optimizer save without another update. A tiny end-to-end run completed both branches on the prepared corpus; its F16 GGUF passed five tokenizer probes and three greedy first-token checks. These checks establish execution and export compatibility, not coherence or full Colab GPU-run quality.
+
+## Earlier fresh capacity comparison
+
+**Select `compare-capacity` explicitly to repeat the earlier fresh 14M versus 42M experiment.** Both models start from random weights and train on the same Christmas books. The uploaded checkpoint is not loaded. The experiment tests capacity under a shared recipe; it does not claim that 42M will be sufficient or that either model's optimal hyperparameters have been found.
+
+Copy all of [model.py](model.py) into one Colab GPU cell. Its source list, installation bootstrap, cleaning, tokenizer training, training loop, and evaluation code are inline. Change the arguments near the top to:
 
 ~~~python
 NOTEBOOK_ARGS = ["compare-capacity", "--output-dir", "runs/christmas-capacity"]
@@ -117,7 +193,7 @@ These were starting heuristics, **not the result of a completed hyperparameter s
 
 Select **Runtime → Change runtime type → GPU**. A T4 is a suitable starting point; the script selects FP16 on T4 and BF16 on supported GPUs. CPU execution works for verification but is slower. CUDA execution has not been tested in the implementation environment; CPU regression tests and an actual 42M forward/backward update on the local Apple accelerator have passed.
 
-**One continuous cell:** open [model.py](model.py), copy the entire file into one code cell in a fresh Colab GPU runtime, and run it. The cell installs its dependencies, uses its embedded list of all 189 URLs, and starts training automatically. It does not need a repository clone, `corpus.py`, or `requirements.txt`.
+**One continuous cell:** open [model.py](model.py), copy the entire file into one code cell in a fresh Colab GPU runtime, set `NOTEBOOK_ARGS = ["train"]`, and run it. The cell installs its dependencies, uses its embedded list of all 189 URLs, and starts fresh training. It does not need a repository clone, `corpus.py`, or `requirements.txt`.
 
 Edit `NOTEBOOK_ARGS` near the top before running if needed:
 

@@ -5,8 +5,9 @@ one code cell, and run it. Dependencies are installed and training starts using
 the source list embedded below. No repository clone or corpus.py is required.
 Edit NOTEBOOK_ARGS below to change options or resume a notebook run.
 
-The default pasted cell runs compare-capacity: fresh 14M and 42M models on the
-same books, with a frozen prose benchmark and no test-set evaluation.
+The default pasted cell runs finetune-scenes from the existing best 14M model:
+ordinary continuation versus original-text scene candidates plus corpus replay.
+Keep the original prepared data and checkpoint available; nothing is rebuilt.
 Use --plan-only to inspect the budget, --smoke-test for a tiny execution check,
 and --resume to recover the pair without restarting completed branches.
 
@@ -35,10 +36,11 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
-# Fresh 14M/42M comparison on the same original books. Add "--resume" after a
-# disconnect. Use --smoke-test first to check the pipeline with tiny CPU models.
+# Option 1: continue the existing 14M best checkpoint on intact scene candidates.
+# Default source: runs/christmas-capacity/14m/best. Override --continue-from if
+# your files are on Drive. Add --resume after a disconnect (omit --continue-from).
 # For Colab persistence, set --data-dir and --output-dir to mounted Drive paths.
-NOTEBOOK_ARGS = ["compare-capacity", "--output-dir", "runs/christmas-capacity"]
+NOTEBOOK_ARGS = ["finetune-scenes", "--output-dir", "runs/christmas-scenes"]
 NOTEBOOK_REQUIREMENTS = [
     "torch>=2.6,<3", "transformers==4.57.6", "tokenizers==0.22.2", "accelerate==1.12.0",
     "huggingface-hub==0.36.2", "numpy>=1.26,<3", "requests>=2.32,<3", "safetensors>=0.4",
@@ -613,7 +615,10 @@ class CausalCollator:
         for i, example in enumerate(examples):
             n = len(example["input_ids"])
             ids[i, :n] = torch.tensor(example["input_ids"])
-            labels[i, :n] = ids[i, :n]
+            supplied = example.get("labels", example["input_ids"])
+            if len(supplied) != n:
+                raise ValueError("Labels must align with input IDs before causal shifting")
+            labels[i, :n] = torch.tensor(supplied)
             mask[i, :n] = 1
         # Position zero is context, never a next-token target. Mask it explicitly
         # so Trainer's accumulation denominator counts the shifted targets too.
@@ -890,6 +895,7 @@ def training(args):
     )
     from transformers.trainer_utils import get_last_checkpoint
     fixed_budget = getattr(args, "fixed_budget", False)
+    scene_recipe = getattr(args, "scene_recipe", None)
     attention_dropout = getattr(args, "attention_dropout", .1)
     if (args.resume or args.continue_from) and args.rebuild:
         raise ValueError("Do not rebuild a dataset while resuming or continuing an existing model")
@@ -969,6 +975,8 @@ def training(args):
     if continuation is not None:
         settings["continue_from"] = continuation["source"]
     settings["grow_layers"] = (continuation or {}).get("depth_growth", {}).get("target_layers")
+    if scene_recipe is not None:
+        settings["scene_recipe"] = scene_recipe
     if args.resume:
         prior = json.loads((out / "run_config.json").read_text())
         prior.setdefault("warmup_ratio", .05)  # Compatibility with the original script.
@@ -998,11 +1006,14 @@ def training(args):
     parameters = model.num_parameters()
     train_set = BookWindows(data / "train.jsonl", args.block_size, args.train_limit,
                             random_offsets=args.random_window_offsets, seed=args.seed)
+    review_training_data = train_set
+    if scene_recipe and scene_recipe["treatment"]:
+        train_set = SceneReplayDataset(train_set, args.scene_records, tokenizer.eos_token_id, args.seed)
     val_set = BookWindows(data / "validation.jsonl", args.block_size, args.eval_limit)
     effective_batch = args.batch_size * args.accumulation
     origin = "Continued" if continuation is not None else "Random"
-    print(f"{origin} GPT-2: {parameters:,} parameters; {len(train_set):,} training windows; "
-          f"effective batch {effective_batch} (~{effective_batch*(args.block_size-1):,} targets/update).", flush=True)
+    print(f"{origin} GPT-2: {parameters:,} parameters; {len(train_set):,} training examples; "
+          f"effective batch {effective_batch} (at most {effective_batch*(args.block_size-1):,} targets/update).", flush=True)
     print(f"Unique training target tokens/parameter: {report['splits']['train']['target_tokens']/parameters:.2f}. "
           "Repeated epochs do not add new language evidence.", flush=True)
     use_cuda = torch.cuda.is_available() and not args.cpu
@@ -1036,7 +1047,7 @@ def training(args):
     callbacks = [window_epoch_callback(train_set), SampleCallback()]
     capacity_hook = None
     if fixed_budget:
-        capacity_hook = capacity_callback(args, tokenizer, train_set)
+        capacity_hook = capacity_callback(args, tokenizer, review_training_data)
         callbacks.append(capacity_hook)
     else:
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=args.patience,
@@ -1063,6 +1074,9 @@ def training(args):
         continuation["initial_validation_nll"] = baseline["eval_nll"]
         write_json(out / "continuation.json", continuation)
         write_json(out / "initial_samples.json", generate_samples(model, tokenizer, PROMPTS, args.sample_tokens))
+        if scene_recipe is not None:
+            run_capacity_review(model, tokenizer, args.capacity_benchmark, review_training_data,
+                                initial, 0, baseline["eval_nll"])
         print(f"Continuation baseline NLL: {baseline['eval_nll']:.6f}. "
               "Fresh optimizer/schedule; update numbering restarts at zero.", flush=True)
     if completed_resume:
@@ -1117,9 +1131,10 @@ def training(args):
         summary["applied_optimizer_updates"] = trainer.state.global_step-summary["optimizer_skipped_steps"]
         summary["training_exposure"] = training_exposure(train_set, effective_batch,
                                                          trainer.state.global_step, args.seed)
-        summary["best_validation_step"] = int(Path(trainer.state.best_model_checkpoint).name.split("-")[-1])
+        summary["best_validation_step"] = (0 if continuation and continuation["retained_initial_model"] else
+                                          int(Path(trainer.state.best_model_checkpoint).name.split("-")[-1]))
         write_json(best / "training_summary.json", summary)
-        run_capacity_review(model, tokenizer, args.capacity_benchmark, train_set,
+        run_capacity_review(model, tokenizer, args.capacity_benchmark, review_training_data,
                             best, summary["best_validation_step"], summary["best_validation_nll"])
     (best / "README.md").write_text(model_card(summary), encoding="utf-8")
     print(f"Best model and tokenizer: {best}", flush=True)
@@ -1286,6 +1301,8 @@ def atomic_json(path, value):
 def training_exposure(dataset, effective_batch, steps, seed):
     """Exact target count, including short book tails and a partial last update."""
     import torch
+    if isinstance(dataset, SceneReplayDataset):
+        return dataset.exposure(effective_batch, steps, seed)
     lengths = [min(dataset.block_size, len(dataset.books[book])-start)-1
                for book, start in dataset.windows]
     per_epoch = math.ceil(len(lengths)/effective_batch)
@@ -1485,7 +1502,17 @@ def run_capacity_review(model, tokenizer, benchmark, training_data, destination,
                             "generated_tokens": len(ids),
                             "ended_with_eos": bool(sample["token_ids"] and sample["token_ids"][-1] == tokenizer.eos_token_id),
                             **repetition_counts(ids)})
-    for result, match in zip(results, copied_training_spans(generated_ids, training_data)):
+    short_results = []
+    if benchmark.get("short_tokens"):
+        for result, ids in zip(results, generated_ids):
+            short_ids = ids[:benchmark["short_tokens"]]
+            short_results.append({**result, "token_ids": short_ids,
+                                  "continuation": tokenizer.decode(short_ids, skip_special_tokens=True),
+                                  "generated_tokens": len(short_ids),
+                                  "ended_with_eos": result["ended_with_eos"] and len(ids) <= len(short_ids),
+                                  **repetition_counts(short_ids)})
+        generated_ids += [row["token_ids"] for row in short_results]
+    for result, match in zip(results+short_results, copied_training_spans(generated_ids, training_data)):
         result["training_copy"] = match
         result["longest_training_copy_tokens"] = match["matched_tokens"]
     report = {"step": step, "validation_nll": nll, "benchmark_sha256": json_digest(benchmark),
@@ -1496,6 +1523,10 @@ def run_capacity_review(model, tokenizer, benchmark, training_data, destination,
               "review_rubric": {"0": "clear failure", "1": "mixed or uncertain", "2": "sustained success"},
               "acceptance": "Manual review required; loss, low repetition, and copying are not coherence scores."}
     write_coherence_sheet(destination / "review.csv", results)
+    if short_results:
+        report["short_samples"] = short_results
+        report["short_panel_note"] = "First tokens of the same continuations; not additional independent samples."
+        write_coherence_sheet(destination / "short_review.csv", short_results)
     atomic_json(destination / "coherence.json", report)  # Completion marker written last.
     print(f"\n[coherence | step {step}] {len(results)} continuations: {destination / 'coherence.json'}", flush=True)
     for result in results[:2]:
@@ -1526,7 +1557,8 @@ def capacity_callback(args, tokenizer, training_data):
             atomic_json(destination / "model" / "training_summary.json", {
                 "dataset_sha256": args.capacity_benchmark["dataset_sha256"], "global_step": state.global_step,
                 "validation_nll": nll, "parameters": model.num_parameters(), "test": {},
-                "initialization": "random", "benchmark_sha256": args.benchmark_sha256})
+                "initialization": "project_checkpoint" if getattr(args, "scene_recipe", None) else "random",
+                "benchmark_sha256": args.benchmark_sha256})
             run_capacity_review(model, tokenizer, args.capacity_benchmark, training_data,
                                 destination, state.global_step, nll)
 
@@ -1725,6 +1757,450 @@ def compare_capacity(args):
     return results
 
 
+def scene_sentence_ends(text):
+    """Conservative boundary heuristic, not a syntactic/semantic parser."""
+    abbreviations = {"mr", "mrs", "ms", "dr", "st", "rev", "prof", "jr", "sr"}
+    ends = []
+    for match in re.finditer(r'''[.!?]["'”’)]*(?=\s|$)''', text):
+        before = re.search(r"([A-Za-z]+)$", text[:match.start()])
+        if match.group()[0] == "." and before and (
+                before[1].lower() in abbreviations or len(before[1]) == 1):
+            continue
+        ends.append(match.end())
+    return ends
+
+
+def extract_scene_candidates(dataset, tokenizer, minimum=192, maximum=448, per_book=16):
+    """Rank exact, nonoverlapping training-book excerpts by simple surface features.
+
+    These are CANDIDATES, not certified complete scenes. Neither punctuation nor
+    readability establishes semantic closure. Automatic cuts never acquire EOS.
+    A CSV review can remove candidates and explicitly mark natural scene ends.
+    """
+    from bisect import bisect_left, bisect_right
+    from collections import Counter
+
+    texts = [tokenizer.decode(book[1:-1].tolist(), clean_up_tokenization_spaces=False)
+             for book in dataset.books]
+    counts = Counter(word.lower() for text in texts for word in re.findall(r"[A-Za-z]+", text))
+    selected, seen = [], set()
+    rejected = Counter()
+    for book_id, book, text in zip(dataset.book_ids, dataset.books, texts):
+        encoded = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True, verbose=False)
+        if encoded["input_ids"] != book[1:-1].tolist():
+            raise ValueError(f"Scene extraction cannot round-trip training book {book_id}")
+        starts, ends = zip(*encoded["offset_mapping"])
+        paragraphs = [(m.start(), m.end()) for m in re.finditer(r"\S(?:[^\n]|\n(?![ \t]*\n))*", text)]
+        options = []
+        for paragraph_index, (begin, _) in enumerate(paragraphs):
+            # Avoid headings/front matter and obvious unanchored dialogue or anaphora.
+            first = text[begin:paragraphs[paragraph_index][1]].strip()
+            if not first or first[0] in '\"\'“‘' or re.match(
+                    r"(?i)^(he|she|they|it|his|her|their|then|but|and|so|this|that)\b", first):
+                rejected["unanchored_opening"] += 1
+                continue
+            start = bisect_left(starts, begin)
+            if start >= len(starts) or starts[start] != begin or start < len(starts)*.03:
+                continue
+            for _, raw_end in paragraphs[paragraph_index:paragraph_index+12]:
+                finish = raw_end
+                while finish > begin and text[finish-1].isspace():
+                    finish -= 1
+                end = bisect_right(ends, finish)
+                if end-start > maximum:
+                    break
+                if end-start < minimum or end == 0 or ends[end-1] != finish:
+                    continue
+                passage = text[begin:finish]
+                blocks = re.split(r"\n\s*\n", passage)
+                if any(len(b.split()) < 5 or b.strip().isupper() or re.match(
+                        r"(?i)^\s*(chapter\b|book [ivx]+\b|\[illustration|contents\b|footnote\b)", b)
+                       or (b.count("\n") >= 3 and len(b.split())/(b.count("\n")+1) < 8)
+                       for b in blocks):
+                    rejected["heading_or_verse"] += 1
+                    continue
+                boundaries = scene_sentence_ends(passage)
+                if len(boundaries) < 4 or boundaries[-1] != len(passage):
+                    rejected["sentence_boundaries"] += 1
+                    continue
+                words = re.findall(r"[A-Za-z]+", passage)
+                sentence_lengths = [len(re.findall(r"[A-Za-z]+", passage[a:b]))
+                                    for a, b in zip([0]+boundaries[:-1], boundaries)]
+                mean_length = sum(sentence_lengths)/len(sentence_lengths)
+                rare_fraction = sum(counts[w.lower()] < 20 for w in words)/max(1, len(words))
+                # Capitalized interior words are only a proxy for character/setting complexity.
+                names = set(re.findall(r"(?<=[a-z,;] )\b[A-Z][a-z]{2,}\b", passage))
+                if mean_length > 22 or max(sentence_lengths) > 50 or rare_fraction > .12 or len(names) > 6:
+                    rejected["complexity_proxy"] += 1
+                    continue
+                prefix_options = []
+                for boundary in boundaries[:-1]:
+                    position = bisect_right(ends, begin+boundary)
+                    if (48 <= position-start <= 128 and end-position >= 64
+                            and ends[position-1] == begin+boundary):
+                        prefix_options.append(position-start)
+                if not prefix_options:
+                    rejected["prefix_length"] += 1
+                    continue
+                prefix = min(prefix_options, key=lambda x: abs(x-96))
+                ids = book[start+1:end+1].tolist()
+                assert tokenizer.decode(ids, clean_up_tokenization_spaces=False) == passage
+                content_hash = hashlib.sha256(passage.encode()).hexdigest()
+                score = mean_length + 100*rare_fraction + 2*len(names)
+                options.append({"scene_id": f"{book_id}-{start+1}-{end+1}", "book_id": book_id,
+                                "start_token": start+1, "end_token": end+1, "prefix_tokens": prefix,
+                                "text_sha256": content_hash, "text": passage, "input_ids": ids,
+                                "natural_end": False, "original_book_end": end == len(starts),
+                                "score": round(score, 6), "mean_sentence_words": round(mean_length, 3),
+                                "rare_word_fraction": round(rare_fraction, 4), "name_proxy_count": len(names)})
+        kept = []
+        for row in sorted(options, key=lambda r: (r["score"], r["start_token"], r["end_token"])):
+            if row["text_sha256"] in seen or any(
+                    row["start_token"] < other["end_token"] and other["start_token"] < row["end_token"]
+                    for other in kept):
+                continue
+            kept.append(row)
+            seen.add(row["text_sha256"])
+            if len(kept) == per_book:
+                break
+        selected.extend(kept)
+    return selected, {"method": "automatic_surface_heuristics_not_semantic_scene_certification",
+                      "candidates": len(selected), "books": len({r["book_id"] for r in selected}),
+                      "unique_excerpt_tokens": sum(len(r["input_ids"]) for r in selected),
+                      "rejections": dict(rejected), "automatic_scene_eos": False}
+
+
+def write_scene_sheet(path, records):
+    import csv
+    fields = ["scene_id", "book_id", "start_token", "end_token", "text_sha256", "include",
+              "natural_end", "prefix_tokens", "score", "text"]
+    with Path(path).open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for row in records:
+            writer.writerow({k: (1 if k == "include" else 0 if k == "natural_end" else row[k]) for k in fields})
+
+
+def apply_scene_review(records, path):
+    """Only inclusion and a natural-end annotation may change; never source text."""
+    import csv
+    lookup = {row["scene_id"]: row for row in records}
+    selected, seen = [], set()
+    with Path(path).open(newline="", encoding="utf-8-sig") as handle:
+        for row in csv.DictReader(handle):
+            scene_id = row["scene_id"]
+            if scene_id not in lookup or scene_id in seen:
+                raise ValueError(f"Unknown/duplicate scene ID in review: {scene_id}")
+            seen.add(scene_id)
+            original = lookup[scene_id]
+            for field in ("book_id", "start_token", "end_token", "text_sha256", "prefix_tokens", "text"):
+                if str(original[field]) != row[field]:
+                    raise ValueError(f"Scene review changed original content or boundaries: {scene_id}/{field}")
+            if row["include"] not in {"0", "1"} or row["natural_end"] not in {"0", "1"}:
+                raise ValueError("Scene CSV include/natural_end must be 0 or 1")
+            if row["include"] == "1":
+                selected.append({**original, "natural_end": row["natural_end"] == "1"})
+    if not selected:
+        raise ValueError("Scene review selects no training passages")
+    return selected
+
+
+class SceneReplayDataset:
+    """50% scene examples / 50% original windows, before token-loss weighting.
+
+    Each epoch contains every original replay window once. Scene slots cycle
+    through an order interleaved across books. Prefixes are context only; original and
+    explicitly reviewed natural ends are the only additional EOS targets.
+    """
+    def __init__(self, replay, records, eos_id, seed=42):
+        if not records:
+            raise ValueError("Scene mixture needs at least one selected training excerpt")
+        self.replay, self.records, self.eos_id, self.seed = replay, records, eos_id, seed
+        self.block_size, self.random_offsets = replay.block_size, replay.random_offsets
+        train_books = dict(zip(replay.book_ids, replay.books))
+        self.scene_rows = []
+        for row in records:
+            book = train_books.get(row["book_id"])
+            if book is None or book[row["start_token"]:row["end_token"]].tolist() != row["input_ids"]:
+                raise ValueError("Scene is not an exact slice of a training book")
+            ids = list(row["input_ids"])
+            if row["original_book_end"]:
+                if row["end_token"] != len(book)-1 or int(book[-1]) != eos_id:
+                    raise ValueError("Invalid original-book ending annotation")
+            if row["natural_end"] or row["original_book_end"]:
+                ids.append(eos_id)
+            prefix = row["prefix_tokens"]
+            if not 1 <= prefix < len(ids) or len(ids) > self.block_size:
+                raise ValueError("Scene prefix/target does not fit the source model's context")
+            self.scene_rows.append({"input_ids": ids, "labels": [-100]*prefix+ids[prefix:]})
+        self.set_training_epoch(0)
+
+    def __len__(self):
+        return 2*len(self.replay)
+
+    def set_training_epoch(self, epoch):
+        self.epoch = int(epoch)
+        self.replay.set_training_epoch(epoch)
+        rng = random.Random(self.seed+self.epoch)
+        books = defaultdict(list)
+        for i, row in enumerate(self.records):
+            books[row["book_id"]].append(i)
+        for rows in books.values():
+            rng.shuffle(rows)
+        order = list(books)
+        rng.shuffle(order)
+        self.scene_order = []
+        while any(books.values()):
+            for book in order:
+                if books[book]:
+                    self.scene_order.append(books[book].pop())
+
+    def __getitem__(self, index):
+        slot, is_replay = divmod(index, 2)
+        if is_replay:
+            return self.replay[slot]
+        return self.scene_rows[self.scene_order[slot % len(self.scene_order)]]
+
+    def exposure(self, effective_batch, steps, seed):
+        import torch
+        previous_epoch = self.epoch
+        per_epoch = math.ceil(len(self)/effective_batch)
+        result = {"steps": steps, "updates_per_epoch": per_epoch, "complete_epochs": steps//per_epoch,
+                  "examples": 0, "scored_targets": 0, "scene_examples": 0, "scene_targets": 0,
+                  "replay_examples": 0, "replay_targets": 0}
+        remaining = steps
+        try:
+            for epoch in range(math.ceil(steps/per_epoch)):
+                self.set_training_epoch(epoch)
+                count = min(remaining, per_epoch)*effective_batch
+                order = torch.randperm(len(self), generator=torch.Generator().manual_seed(seed+epoch)).tolist()
+                for index in order[:count]:
+                    row = self[index]
+                    targets = sum(t != -100 for t in row["labels"][1:]) if "labels" in row else len(row["input_ids"])-1
+                    kind = "replay" if index % 2 else "scene"
+                    result[kind+"_examples"] += 1
+                    result[kind+"_targets"] += targets
+                    result["examples"] += 1
+                    result["scored_targets"] += targets
+                remaining -= min(remaining, per_epoch)
+        finally:
+            self.set_training_epoch(previous_epoch)
+        result["scene_fraction_of_scored_targets"] = result["scene_targets"]/max(1, result["scored_targets"])
+        return result
+
+
+def finetune_scenes(args):
+    """Bounded option-1 pilot; all text and tokenization come from the saved corpus."""
+    import gc
+    import os
+
+    import torch
+    from transformers import AutoTokenizer, GPT2Config, GPT2LMHeadModel, set_seed
+
+    if args.corpus or args.rebuild or args.grow_layers or args.continuation_dropout is not None:
+        raise ValueError("finetune-scenes keeps the original corpus, architecture, tokenizer, and dropout")
+    if args.resume not in {None, "latest"}:
+        raise ValueError("Use --resume without a checkpoint path for the whole scene experiment")
+    if int(os.environ.get("WORLD_SIZE", "1")) != 1 or (
+            torch.cuda.is_available() and not args.cpu and torch.cuda.device_count() != 1):
+        raise ValueError("Expose one training device/process for reproducible scene sampling")
+    if not (Path(args.data_dir)/"report.json").is_file():
+        raise ValueError("Restore the source run's prepared data/ directory; scene continuation never rebuilds it")
+    out, data = Path(args.output_dir), Path(args.data_dir)
+    if out.exists() and any(out.iterdir()) and not args.resume:
+        raise ValueError("Use a new scene output directory or --resume (also after --plan-only)")
+    if args.resume and not (out/"experiment.json").is_file():
+        raise ValueError("No frozen scene experiment to resume")
+    if args.max_steps <= 0 or args.max_steps < args.eval_steps:
+        raise ValueError("Set a positive scene pilot budget at least as large as --eval-steps")
+    if args.train_limit or args.eval_limit:
+        raise ValueError("Use --smoke-test for execution checks; real scene runs use full train/validation splits")
+    prepare(args)
+    signature = dataset_signature(data)
+    manifest = json.loads((data/"manifest.json").read_text())
+    if any(row["url"] not in sources for row in manifest):
+        raise ValueError("Prepared data contain sources outside the original Christmas list")
+    tokenizer = AutoTokenizer.from_pretrained(data/"tokenizer", local_files_only=True)
+    original = BookWindows(data/"train.jsonl", 512, random_offsets=True, seed=args.seed)
+    source = Path(args.continue_from or ROOT/"runs/christmas-capacity/14m/best").resolve()
+    snapshot = out/"starting_model"
+    if out.resolve() == source or out.resolve() in source.parents:
+        raise ValueError("Scene output must not contain or replace the source checkpoint")
+    if args.resume:
+        prior = json.loads((out/"experiment.json").read_text())
+        model = load_continuation(snapshot, tokenizer, signature)
+        source_description = prior["source"]
+    elif args.smoke_test:
+        set_seed(args.model_seed)
+        model = GPT2LMHeadModel(GPT2Config(
+            vocab_size=len(tokenizer), n_positions=512, n_ctx=512, n_layer=1, n_embd=32,
+            n_head=2, n_inner=128, bos_token_id=tokenizer.bos_token_id,
+            eos_token_id=tokenizer.eos_token_id, pad_token_id=tokenizer.pad_token_id,
+            resid_pdrop=.05, embd_pdrop=.05, attn_pdrop=.05))
+        source_description = {"kind": "random_tiny_execution_check", "seed": args.model_seed}
+    else:
+        if not source.is_dir():
+            raise ValueError(f"Source model not found: {source}. Set --continue-from to the actual "
+                             "14m/best directory containing model.safetensors. Reports alone are not weights.")
+        model = load_continuation(source, tokenizer, signature)
+        if (model.config.n_layer, model.config.n_embd, model.config.n_head, model.config.n_positions) != (6, 384, 6, 512):
+            raise ValueError("This option-1 pilot requires the existing 6x384, 6-head, context-512 model")
+        source_description = {"kind": "existing_project_14m", "path": str(source),
+                              "parameters": model.num_parameters()}
+    args.block_size = model.config.n_positions
+    weight_digest = hashlib.sha256()
+    for name, tensor in sorted(model.state_dict().items()):
+        weight_digest.update(f"{name}:{tensor.dtype}:{list(tensor.shape)}".encode())
+        weight_digest.update(tensor.detach().cpu().contiguous().reshape(-1).view(torch.uint8).numpy().tobytes())
+    if args.smoke_test:
+        args.cpu, args.precision = True, "fp32"
+        args.batch_size, args.accumulation, args.max_steps = 2, 1, 3
+        args.train_limit, args.eval_limit = 16, 8
+        args.eval_steps, args.sample_steps, args.benchmark_steps = 2, 2, 2
+        args.sample_tokens, args.benchmark_tokens, args.benchmark_prompts = 12, 12, 2
+    args.precision = resolve_precision(args.precision, args.cpu)
+    candidates, extraction = extract_scene_candidates(
+        original, tokenizer, args.scene_min_tokens, args.scene_max_tokens, args.scenes_per_book)
+    records = apply_scene_review(candidates, args.scene_review) if args.scene_review else candidates
+    if len(records) < (1 if args.smoke_test else 128):
+        raise ValueError(f"Only {len(records)} scenes selected; need 128 for the real pilot. "
+                         "Review extraction settings instead of silently training on a tiny repeated subset.")
+    selection = {"dataset_sha256": signature, "extraction": extraction,
+                 "selection": "review_csv" if args.scene_review else "automatic_candidates",
+                 "records": records}
+    benchmark = make_capacity_benchmark(data, tokenizer, signature, args.benchmark_prompts,
+                                       args.seed, generation_tokens=args.benchmark_tokens)
+    original_benchmark_hash = json_digest(benchmark)
+    benchmark["short_tokens"] = min(96, args.benchmark_tokens)
+    if args.smoke_test:
+        benchmark["training_eval_windows"] = 16
+    benchmark_hash = json_digest(benchmark)
+    recipe = {"version": 1, "selection_sha256": json_digest(selection),
+              "scene_example_fraction": .5, "prefix_loss": "masked",
+              "scene_eos": "original_book_end_or_reviewed_natural_end_only"}
+    settings = {k: getattr(args, k) for k in (
+        "seed", "model_seed", "batch_size", "accumulation", "learning_rate", "warmup_ratio", "max_steps",
+        "eval_steps", "sample_steps", "sample_tokens", "benchmark_steps", "precision", "smoke_test",
+        "scene_min_tokens", "scene_max_tokens", "scenes_per_book", "train_limit", "eval_limit")}
+    replay = BookWindows(data/"train.jsonl", args.block_size, args.train_limit,
+                         random_offsets=True, seed=args.seed)
+    mixture = SceneReplayDataset(replay, records, tokenizer.eos_token_id, args.seed)
+    plan = {"version": 1, "source": source_description, "starting_weights_sha256": weight_digest.hexdigest(),
+            "source_configuration": {k: getattr(model.config, k) for k in (
+                "n_layer", "n_embd", "n_head", "n_positions", "resid_pdrop", "embd_pdrop", "attn_pdrop")},
+            "dataset_sha256": signature,
+            "benchmark_sha256": benchmark_hash, "original_full_benchmark_sha256": original_benchmark_hash,
+            "settings": settings, "recipe": recipe, "test_evaluated": False,
+            "matched_compute": False, "matched_target_counts": False, "coherence_winner": None,
+            "selected_scenes": len(records), "selected_books": len({r["book_id"] for r in records}),
+            "reviewed_natural_ends": sum(r["natural_end"] for r in records),
+            "planned_exposure": {
+                "control": training_exposure(replay, args.batch_size*args.accumulation, args.max_steps, args.seed),
+                "scenes": training_exposure(mixture, args.batch_size*args.accumulation, args.max_steps, args.seed)},
+            "rationale": {
+                "source": "Reuse this project's best 14M weights and train-only tokenizer; no external pretraining.",
+                "selection": "Exact nonoverlapping paragraph-aligned excerpts, 192-448 tokens by default. "
+                "Prefer shorter sentences, fewer rare words and capitalized-name proxies. These heuristics "
+                "do not certify semantic self-containment. Inspect scene_candidates.csv; optionally supply a reviewed copy.",
+                "mixture": "Half of examples are scene prefixes plus original continuations; half are original "
+                "shifted windows. Each mixture epoch includes every replay window once. Scene prefixes are "
+                "context only. Token-weighted loss gives scenes less than half of targets; exact counts are reported.",
+                "endings": "Automatic paragraph cuts never receive invented EOS labels. Only original book ends "
+                "and natural ends explicitly annotated in the review CSV teach an excerpt to stop.",
+                "optimization": "Fresh AdamW, peak 5e-5 by default (one sixth of pretraining peak), betas .9/.95, "
+                "weight decay .1, clip 1. Inherit dropout. 3% warmup, cosine to 10% of peak, 1000 updates. "
+                "A bounded starting hypothesis, not optimized or proven to yield coherent prose.",
+                "control": "Same starting weights, optimizer settings and update count; ordinary training versus "
+                "the full scene intervention. Target counts and compute differ because scenes mask prefixes.",
+                "review": "Retain unchanged baseline, best full-validation-NLL model, and all review snapshots. "
+                "Read 192-token continuations plus their first 96 tokens. Lower NLL is not a coherence verdict."}}
+    if args.resume:
+        if prior != plan or json.loads((out/"scene_selection.json").read_text()) != selection:
+            raise ValueError("Frozen scene settings, source annotations, or dataset changed; use a new experiment")
+        if json.loads((out/"benchmark.json").read_text()) != benchmark:
+            raise ValueError("Frozen scene benchmark changed")
+    else:
+        out.mkdir(parents=True, exist_ok=True)
+        model.save_pretrained(snapshot, safe_serialization=True)
+        tokenizer.save_pretrained(snapshot)
+        atomic_json(snapshot/"provenance.json", {"dataset_sha256": signature})
+        atomic_json(out/"scene_selection.json", selection)
+        write_scene_sheet(out/"scene_candidates.csv", candidates)
+        atomic_json(out/"benchmark.json", benchmark)
+        atomic_json(out/"experiment.json", plan)
+    del model, original, mixture, replay
+    gc.collect()
+    print("\nSCENE PILOT PLAN:", flush=True)
+    print(json.dumps({k: v for k, v in plan.items() if k != "rationale"}, indent=2), flush=True)
+    print("Selections are original-text candidates; automatic filters do not prove scene coherence. "
+          f"Review {out/'scene_candidates.csv'}.", flush=True)
+    if args.plan_only:
+        print("Plan saved. Add --resume to run unchanged; to use edited annotations, start a NEW output "
+              "with --scene-review pointing to the edited CSV.", flush=True)
+        return plan
+    results = {}
+    for name in ("control", "scenes"):
+        branch = argparse.Namespace(**vars(args))
+        branch.output_dir, branch.command = str(out/name), "train"
+        branch.continue_from = str(snapshot.resolve())
+        branch.fixed_budget, branch.skip_test, branch.random_window_offsets = True, True, True
+        branch.capacity_benchmark, branch.benchmark_sha256 = benchmark, benchmark_hash
+        branch.scene_recipe, branch.scene_records = {**recipe, "treatment": name == "scenes"}, records
+        branch.resume = "latest" if args.resume and (out/name/"run_config.json").exists() else None
+        if branch.resume and latest_complete_checkpoint(out/name, require_scaler=args.precision == "fp16"):
+            # Restore the stage's recorded baseline and optimizer. A fresh
+            # --continue-from would discard initial_validation_nll on resume.
+            branch.continue_from = None
+        complete = out/name/"best/training_summary.json"
+        if branch.resume and complete.exists() and (out/name/"best/coherence.json").exists():
+            summary = json.loads(complete.read_text())
+            if (summary["global_step"] != args.max_steps or summary["dataset_sha256"] != signature
+                    or summary["run"].get("scene_recipe") != branch.scene_recipe):
+                raise ValueError(f"Completed scene branch does not match frozen plan: {name}")
+        else:
+            summary = training(branch)
+        results[name] = {k: summary[k] for k in (
+            "parameters", "global_step", "best_validation_nll", "best_validation_step", "training_exposure",
+            "optimizer_skipped_steps", "applied_optimizer_updates")}
+        results[name]["best_model"] = str(out/name/"best")
+        results[name]["retained_initial_model"] = summary["continuation"]["retained_initial_model"]
+        results[name]["initial_validation_nll"] = summary["continuation"]["initial_validation_nll"]
+        atomic_json(out/"comparison.json", {"complete": len(results) == 2, "branches": results,
+                    "benchmark_sha256": benchmark_hash, "test_evaluated": False, "matched_compute": False,
+                    "matched_target_counts": False, "coherence_winner": None,
+                    "interpretation": "Assess prose and copying against the unchanged baseline and trained control."})
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+    key = {}
+    for selection_name in ("best", "final"):
+        destinations = [("baseline", out/"control/initial", out/"starting_model")]
+        for name in results:
+            folder = out/name/("best" if selection_name == "best" else f"reviews/step-{args.max_steps}")
+            destinations.append((name, folder, folder if selection_name == "best" else folder/"model"))
+        for panel, field in (("full", "samples"), ("short", "short_samples")):
+            rows = []
+            for name, folder, checkpoint in destinations:
+                for sample in json.loads((folder/"coherence.json").read_text())[field]:
+                    opaque = hashlib.sha256(
+                        f"{benchmark_hash}:{name}:{selection_name}:{panel}:{sample['sample_id']}".encode()).hexdigest()[:16]
+                    key[opaque] = {"branch": name, "selection": selection_name, "panel": panel,
+                                   "sample_id": sample["sample_id"], "checkpoint": str(checkpoint)}
+                    rows.append({**sample, "sample_id": opaque})
+            random.Random(args.seed).shuffle(rows)
+            path = out/f"blind_{selection_name}_{panel}.csv"
+            if not path.exists():  # Preserve ratings if a finished experiment is resumed.
+                write_coherence_sheet(path, rows)
+    atomic_json(out/"review_key.json", key)
+    print(f"\nScene pilot finished. Read {out/'comparison.json'} and blind_best_full.csv / "
+          "blind_final_full.csv; the short panels are prefixes of those same outputs. "
+          "Best-NLL selection can retain the starting weights; every review snapshot remains exportable. "
+          "Test evaluation was not run.", flush=True)
+    return results
+
+
 def model_card(summary):
     return f"""---
 language: en
@@ -1751,6 +2227,7 @@ repetition, dated language, and historical biases. Repeated epochs are not new d
 Best validation NLL: {summary['best_validation_nll']}
 Continuation details: {json.dumps(summary.get('continuation'))}
 Training windows: {'shifted within books each epoch' if summary['run'].get('random_window_offsets') else 'fixed'}
+Run intervention: {'Original-text scene continuations with masked prefixes and corpus replay.' if (summary['run'].get('scene_recipe') or {}).get('treatment') else 'Ordinary causal language modeling.'}
 Test token perplexity: {summary['test'].get('test_perplexity', 'not evaluated in this development run')}
 Smoke test: {summary['smoke_test']}; limited data: {summary['limited_data']}.
 Scores use this model's tokenizer and are not directly comparable to other vocabularies.
@@ -1971,7 +2448,7 @@ def inference(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["prepare", "train", "compare-capacity", "compare-dropout", "compare-windowing", "compare-depth", "diagnose",
+    parser.add_argument("command", choices=["prepare", "train", "finetune-scenes", "compare-capacity", "compare-dropout", "compare-windowing", "compare-depth", "diagnose",
                                             "compare-decoding", "evaluate", "generate"])
     parser.add_argument("--corpus", help="Optional subset of the embedded Christmas URLs, as a Python sources list")
     parser.add_argument("--data-dir", default=str(ROOT / "data"))
@@ -1994,10 +2471,10 @@ def main(argv=None):
     parser.add_argument("--precision", choices=["auto", "fp32", "fp16", "bf16"], default="auto")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--accumulation", type=int, default=4)
-    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument("--warmup-ratio", type=float, default=None)
     parser.add_argument("--epochs", type=float, default=None, help="Capacity comparison: 40; ordinary train: 12")
-    parser.add_argument("--max-steps", type=int, default=-1, help="Optional optimizer-step cap")
+    parser.add_argument("--max-steps", type=int, default=None, help="Optional optimizer-step cap; scene pilot: 1000")
     parser.add_argument("--eval-steps", type=int, default=250)
     parser.add_argument("--sample-steps", type=int, default=None)
     parser.add_argument("--sample-tokens", type=int, default=96)
@@ -2015,14 +2492,18 @@ def main(argv=None):
     parser.add_argument("--train-limit", type=int, help="Diagnostic window cap; omitted for full training")
     parser.add_argument("--random-window-offsets", action="store_true", default=None,
                         help="Shift interior training windows per book/epoch; keep evaluation fixed")
-    parser.add_argument("--benchmark-steps", type=int, default=2000,
+    parser.add_argument("--benchmark-steps", type=int, default=None,
                         help="Capacity comparison: save weights and run the full coherence panel at this interval")
     parser.add_argument("--benchmark-prompts", type=int, default=20,
                         help="Capacity comparison: frozen, book-balanced validation prefixes")
     parser.add_argument("--benchmark-tokens", type=int, default=192,
                         help="Capacity comparison: maximum generated tokens per prefix/seed")
     parser.add_argument("--plan-only", action="store_true",
-                        help="Capacity comparison: freeze data/benchmark/settings and print the budget without training")
+                        help="Capacity/scene comparison: freeze data/benchmark/settings without training")
+    parser.add_argument("--scene-min-tokens", type=int, default=192)
+    parser.add_argument("--scene-max-tokens", type=int, default=448)
+    parser.add_argument("--scenes-per-book", type=int, default=16)
+    parser.add_argument("--scene-review", help="Optional edited scene_candidates.csv; only include/natural_end may change")
     parser.add_argument("--eval-limit", type=int, help="Diagnostic window cap; omitted for full evaluation")
     parser.add_argument("--diagnostic-windows", type=int, default=1024,
                         help="Maximum windows per train/validation split for diagnose")
@@ -2032,23 +2513,37 @@ def main(argv=None):
                         help="Decoding method for generate; both preserves the original greedy/sample output")
     args = parser.parse_args(argv)
     capacity = args.command == "compare-capacity"
+    scenes = args.command == "finetune-scenes"
     defaults = {"min_success_rate": (1., .9), "dropout": (.05, .15),
                 "attention_dropout": (.05, .1), "warmup_ratio": (.02, .05),
                 "epochs": (40., 12.), "sample_steps": (500, 250),
                 "random_window_offsets": (True, False),
                 "output_dir": (str(ROOT / "runs" / "christmas-capacity"), str(ROOT / "runs" / "christmas"))}
+    if scenes:
+        for name, value in {"output_dir": str(ROOT/"runs/christmas-scenes"), "learning_rate": 5e-5,
+                            "warmup_ratio": .03, "max_steps": 1000, "benchmark_steps": 250,
+                            "min_success_rate": 1., "random_window_offsets": True}.items():
+            if getattr(args, name) is None:
+                setattr(args, name, value)
     for name, values in defaults.items():
         if getattr(args, name) is None:
             setattr(args, name, values[0 if capacity else 1])
+    for name, value in {"learning_rate": 3e-4, "max_steps": -1, "benchmark_steps": 2000}.items():
+        if getattr(args, name) is None:
+            setattr(args, name, value)
     if args.model_seed is None:
         args.model_seed = args.seed
     if not all(0 <= seed < 2**32 for seed in (args.seed, args.model_seed)):
         parser.error("Data and model seeds must be integers in [0, 2**32)")
-    if args.plan_only and not capacity:
-        parser.error("--plan-only is for compare-capacity")
+    if args.plan_only and not (capacity or scenes):
+        parser.error("--plan-only is for compare-capacity or finetune-scenes")
+    if args.scene_review and not scenes:
+        parser.error("--scene-review is for finetune-scenes")
+    if scenes and (not 128 <= args.scene_min_tokens <= args.scene_max_tokens <= 510 or args.scenes_per_book <= 0):
+        parser.error("Scenes need 128 <= minimum <= maximum <= 510 tokens, and a positive per-book cap")
     if capacity and (args.layers, args.width, args.heads) != (6, 384, 6):
         parser.error("compare-capacity fixes both architectures; do not override --layers/--width/--heads")
-    if capacity and (min(args.benchmark_steps, args.benchmark_prompts, args.benchmark_tokens) <= 0
+    if (capacity or scenes) and (min(args.benchmark_steps, args.benchmark_prompts, args.benchmark_tokens) <= 0
                      or args.benchmark_tokens+160 > args.block_size):
         parser.error("Capacity benchmark counts must be positive and generation tokens + 160 must fit the context")
     if args.heads <= 0 or args.width % args.heads or args.block_size < 8 or args.vocab_size < 258:
@@ -2079,6 +2574,8 @@ def main(argv=None):
         prepare(args)
     elif args.command == "train":
         training(args)
+    elif args.command == "finetune-scenes":
+        finetune_scenes(args)
     elif args.command == "compare-capacity":
         compare_capacity(args)
     elif args.command == "compare-dropout":
