@@ -5,8 +5,10 @@ one code cell, and run it. Dependencies are installed and training starts using
 the source list embedded below. No repository clone or corpus.py is required.
 Edit NOTEBOOK_ARGS below to change options or resume a notebook run.
 
-The default pasted cell runs a new finetune-winter v2 stage from project weights:
-selected pre-1920 winter domestic fiction plus original Christmas corpus replay.
+The default pasted cell runs train-coherence from existing project weights:
+curriculum, context discrimination, generated-repetition unlikelihood, trained
+longer context, and candidate reranking. All approved winter selections and the
+original Christmas stories remain the positive training data.
 Keep the original prepared data and checkpoint available; nothing is rebuilt.
 Use --plan-only to inspect the budget, --smoke-test for a tiny execution check,
 and --resume to recover without restarting completed branches.
@@ -19,7 +21,7 @@ Colab GPU runtime, separate cells:
     !python model.py generate --prompt "On Christmas Eve, the snow"
 
 The base models use random weights. No external pretrained weights or tokenizer
-are loaded. finetune-winter explicitly adds the inline WINTER_SOURCES selections;
+are loaded. Winter/coherence commands add the inline WINTER_SOURCES selections;
 the older commands retain their original Christmas-only data restrictions.
 """
 from __future__ import annotations
@@ -37,11 +39,11 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
-# Prefer runs/christmas-winter/expanded/best if present, otherwise use the earlier
-# runs/christmas-scenes/control/best. Override --continue-from if
+# Prefer runs/christmas-winter-v2/expanded/best, then christmas-winter/expanded/best,
+# then christmas-scenes/control/best. Override --continue-from if
 # your files are on Drive. Add --resume after a disconnect (omit --continue-from).
 # For Colab persistence, set --data-dir and --output-dir to mounted Drive paths.
-NOTEBOOK_ARGS = ["finetune-winter", "--output-dir", "runs/christmas-winter-v2"]
+NOTEBOOK_ARGS = ["train-coherence", "--output-dir", "runs/christmas-coherence"]
 NOTEBOOK_REQUIREMENTS = [
     "torch>=2.6,<3", "transformers==4.57.6", "tokenizers==0.22.2", "accelerate==1.12.0",
     "huggingface-hub==0.36.2", "numpy>=1.26,<3", "requests>=2.32,<3", "safetensors>=0.4",
@@ -1460,11 +1462,205 @@ def window_epoch_callback(dataset):
     return WindowEpochCallback()
 
 
+def extend_gpt2_context(source, positions):
+    """Retain every old position exactly; initialize new positions by tiling them.
+
+    Rebuild the causal attention buffers too. New positions REQUIRE training;
+    tiling is an initialization, not a claim of zero-shot context extension.
+    """
+    import copy
+    import torch
+    from transformers import GPT2LMHeadModel
+    old = source.config.n_positions
+    if positions < old:
+        raise ValueError("Cannot shrink a trained context")
+    if positions == old:
+        return source, {"old_positions": old, "new_positions": positions, "changed": False}
+    config = copy.deepcopy(source.config)
+    config.n_positions = config.n_ctx = positions
+    with torch.random.fork_rng(devices=[]):
+        torch.random.default_generator.manual_seed(42)  # CPU initialization; leave GPU RNGs untouched.
+        grown = GPT2LMHeadModel(config).to(device=source.device, dtype=source.dtype)
+    state = source.state_dict()
+    state["transformer.wpe.weight"] = source.transformer.wpe.weight.detach().repeat(
+        math.ceil(positions/old), 1)[:positions].clone()
+    grown.load_state_dict(state, strict=True)
+    grown.tie_weights()
+    grown.generation_config = copy.deepcopy(source.generation_config)
+    grown.train(source.training)
+    return grown, {"old_positions": old, "new_positions": positions, "changed": True,
+                   "initialization": "old positions copied exactly; added positions tiled, then trained"}
+
+
+def passage_simplicity(text):
+    """Bounded surface proxy, not a semantic quality label or a text filter."""
+    words = re.findall(r"[A-Za-z]+", text)
+    if not words:
+        return .5
+    sentences = max(1, len(re.findall(r'[.!?](?:[\s\"”]|$)', text)))
+    names = len(set(re.findall(r'(?<=[a-z,;] )\b[A-Z][a-z]{2,}\b', text)))
+    long_words = sum(len(w) > 10 for w in words)/len(words)
+    value = 22/max(8, len(words)/sentences)/(1+names/8+4*long_words)
+    return max(.5, min(1.5, value))
+
+
+class CoherenceDataset:
+    """Annotate original windows; no fabricated positive text or removed books."""
+    def __init__(self, base, tokenizer):
+        self.base, self.tokenizer = base, tokenizer
+        self.block_size, self.random_offsets = base.block_size, base.random_offsets
+
+    @property
+    def epoch(self):
+        return self.base.epoch
+
+    def set_training_epoch(self, epoch):
+        self.base.set_training_epoch(epoch)
+
+    def __len__(self):
+        return len(self.base)
+
+    def __getitem__(self, index):
+        row = self.base[index]
+        pool, dataset, window = 0, self.base, index
+        if isinstance(self.base, WinterReplayDataset):
+            slot, replay = divmod(index, 2)
+            pool = int(not replay)
+            if replay:
+                dataset, window = self.base.replay, slot
+            else:
+                cycle, window = self.base.order[slot]
+                dataset = self.base.cycles[cycle]
+        book, _ = dataset.windows[window]
+        key = int.from_bytes(hashlib.sha256(dataset.book_ids[book].encode()).digest()[:7], 'big')
+        text = self.tokenizer.decode(row['input_ids'], skip_special_tokens=True)
+        return {**row, 'book_key': key, 'pool': pool, 'simplicity': passage_simplicity(text)}
+
+
+def curriculum_weights(simplicity, pools, counts, progress, fraction):
+    """Anneal to uniform; preserve each pool's total weighted targets per batch."""
+    import torch
+    strength = max(0., 1-progress/fraction) if fraction else 0.
+    weights = 1+strength*(simplicity-1)
+    for pool in torch.unique(pools):
+        mask = pools == pool
+        weights[mask] *= counts[mask].sum()/(weights[mask]*counts[mask]).sum().clamp_min(1)
+    return weights
+
+
+def context_pair_loss(model, inputs, labels, book_keys, margin, prefix=128, targets=64):
+    """Rank true source context above different-book context for the SAME suffix."""
+    import torch
+    rows, suffixes = [], []
+    active_positions = [torch.where(row != -100)[0] for row in labels]
+    for i in range(len(inputs)):
+        active = active_positions[i]
+        if len(active) < targets or int(active[0]) < prefix:
+            continue
+        start = int(active[0])
+        other = next((j for j in range(len(inputs)) if book_keys[j] != book_keys[i]
+                      and len(active_positions[j]) and int(active_positions[j][0]) >= prefix), None)
+        if other is None:
+            continue
+        other_start = int(active_positions[other][0])
+        suffix = inputs[i, start:start+targets]
+        if torch.equal(inputs[i, start-prefix:start], inputs[other, other_start-prefix:other_start]):
+            continue
+        rows += [torch.cat((inputs[i, start-prefix:start], suffix)),
+                 torch.cat((inputs[other, other_start-prefix:other_start], suffix))]
+        suffixes.append(suffix)
+    if not rows:
+        return inputs.new_zeros((), dtype=torch.float32), 0
+    batch = torch.stack(rows)
+    target = batch.clone()
+    target[:, :prefix] = -100
+    was_training = model.training
+    model.eval()  # Paired differences must not be dropout noise; gradients remain on.
+    try:
+        logits = model(batch, use_cache=False).logits
+        sums = loss_sums(logits, target)
+        nll = (sums[:, 0]/sums[:, 1]).reshape(-1, 2)
+        return (margin+nll[:, 0]-nll[:, 1]).clamp_min(0).mean(), len(suffixes)
+    finally:
+        model.train(was_training)
+
+
+def repetition_negative_positions(tokens, width=8):
+    """Only third-and-later occurrences of an eight-token phrase are negatives."""
+    seen, positions = defaultdict(int), []
+    for end in range(width-1, len(tokens)):
+        gram = tuple(tokens[end-width+1:end+1])
+        if seen[gram] >= 2:
+            positions.append(end)
+        seen[gram] += 1
+    return positions
+
+
+def repetition_unlikelihood(model, inputs, attention_mask, tokens=64):
+    """Mine one greedy continuation; punish loops, always alongside original CE."""
+    import torch
+    length = min(128, int(attention_mask[0].sum())-1)
+    prefix = inputs[:1, :max(1, length)]
+    budget = min(tokens, model.config.n_positions-prefix.shape[1])
+    if budget <= 0:
+        return inputs.new_zeros((), dtype=torch.float32), 0
+    was_training = model.training
+    model.eval()
+    try:
+        with torch.no_grad():
+            generated = model.generate(prefix, attention_mask=torch.ones_like(prefix), do_sample=False,
+                max_new_tokens=budget, use_cache=True, pad_token_id=model.config.pad_token_id,
+                eos_token_id=model.config.eos_token_id, suppress_tokens=[model.config.pad_token_id])
+        new = generated[0, prefix.shape[1]:].tolist()
+        bad = repetition_negative_positions(new)
+        if not bad:
+            return inputs.new_zeros((), dtype=torch.float32), 0
+        positions = torch.tensor(bad, device=inputs.device)+prefix.shape[1]
+        logits = model(generated, use_cache=False).logits[0, positions-1].float()
+        probabilities = logits.softmax(-1).gather(1, generated[0, positions, None]).squeeze(1)
+        return -torch.log1p(-probabilities.clamp(max=1-1e-5)).mean(), len(bad)
+    finally:
+        model.train(was_training)
+
+
+def coherence_loss(trainer, model, inputs, num_items_in_batch=None, return_outputs=False):
+    import torch
+    cfg = trainer.coherence_config
+    batch = {k: v for k, v in inputs.items() if k not in {'simplicity', 'book_key', 'pool'}}
+    outputs = model(**{k: v for k, v in batch.items() if k != 'labels'}, use_cache=False)
+    sums = loss_sums(outputs.logits, batch['labels'])
+    counts = sums[:, 1].detach()
+    denominator = (counts.sum() if num_items_in_batch is None else
+                   torch.as_tensor(num_items_in_batch, device=counts.device)).clamp_min(1)
+    progress = trainer.state.global_step/max(1, trainer.state.max_steps)
+    weights = curriculum_weights(inputs['simplicity'], inputs['pool'], counts, progress, cfg['curriculum_fraction'])
+    loss = (sums[:, 0]*weights).sum()/denominator
+    contrast, pairs = context_pair_loss(model, batch['input_ids'], batch['labels'], inputs['book_key'],
+                                       cfg['context_margin']) if cfg['context_weight'] else (loss.new_zeros(()), 0)
+    loss = loss+cfg['context_weight']*contrast*counts.sum()/denominator
+    ul, negatives = loss.new_zeros(()), 0
+    step = trainer.state.global_step
+    # Exactly once per optimizer step, including after an optimizer-boundary resume.
+    if cfg['unlikelihood_weight'] and step % cfg['unlikelihood_every'] == 0 and trainer._ul_step != step:
+        trainer._ul_step = step
+        ul, negatives = repetition_unlikelihood(model, batch['input_ids'], batch['attention_mask'], cfg['unlikelihood_tokens'])
+        loss = loss+cfg['unlikelihood_weight']*ul
+    stats = trainer.coherence_stats
+    stats['ce_sum'] += float(sums[:, 0].detach().sum())
+    stats['tokens'] += float(counts.sum())
+    stats['context_sum'] += float(contrast.detach())*pairs
+    stats['pairs'] += pairs
+    stats['ul_sum'] += float(ul.detach())*negatives
+    stats['negatives'] += negatives
+    return (loss, outputs) if return_outputs else loss
+
+
 def training_trainer(*args, **kwargs):
     """Shuffle from the restored training epoch, including a resumed skip loader."""
     import torch
     from torch.utils.data import Sampler
     from transformers import Trainer
+    coherence_config = kwargs.pop('coherence_config', None)
 
     class EpochSampler(Sampler):
         def __init__(self, dataset, seed):
@@ -1478,6 +1674,30 @@ def training_trainer(*args, **kwargs):
             return len(self.dataset)
 
     class WindowTrainer(Trainer):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.coherence_config = coherence_config
+            self.coherence_stats, self._ul_step = defaultdict(float), -1
+            if coherence_config:
+                # Our CE and per-microbatch margin use the accumulation-wide token denominator.
+                self.model_accepts_loss_kwargs = True
+
+        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+            if self.coherence_config and model.training:
+                return coherence_loss(self, model, inputs, num_items_in_batch, return_outputs)
+            clean = {k: v for k, v in inputs.items() if k not in {'simplicity', 'book_key', 'pool'}}
+            return super().compute_loss(model, clean, return_outputs, num_items_in_batch)
+
+        def log(self, logs, start_time=None):
+            if self.coherence_config and ('loss' in logs or 'train_loss' in logs):
+                s = self.coherence_stats
+                logs = {**logs, 'ce_nll': s['ce_sum']/max(1, s['tokens']),
+                        'context_margin_loss': s['context_sum']/max(1, s['pairs']),
+                        'context_pairs': s['pairs'], 'unlikelihood_loss': s['ul_sum']/max(1, s['negatives']),
+                        'unlikelihood_negative_tokens': s['negatives']}
+                self.coherence_stats = defaultdict(float)
+            return super().log(logs, start_time)
+
         def _get_train_sampler(self, train_dataset=None):
             dataset = self.train_dataset if train_dataset is None else train_dataset
             seed = self.args.seed if self.args.data_seed is None else self.args.data_seed
@@ -1579,6 +1799,69 @@ def contrastive_generate(model, inputs, max_new_tokens, pad_id, eos_id, top_k=4,
     return sequence
 
 
+class CoherenceCollator(CausalCollator):
+    def __call__(self, examples):
+        import torch
+        batch = super().__call__(examples)
+        batch['simplicity'] = torch.tensor([r.get('simplicity', 1.) for r in examples])
+        batch['book_key'] = torch.tensor([r.get('book_key', 0) for r in examples])
+        batch['pool'] = torch.tensor([r.get('pool', 0) for r in examples])
+        return batch
+
+
+def rank_continuations(model, tokenizer, prefix, candidates):
+    """Same-model heuristics, not an independent coherence judge. No external LM."""
+    import torch
+    if not prefix or not len(candidates):
+        raise ValueError('Reranking requires a nonempty prefix and candidates')
+    rows = []
+    for index, tokens in enumerate(candidates):
+        ids = list(tokens)
+        if tokenizer.eos_token_id in ids:
+            ids = ids[:ids.index(tokenizer.eos_token_id)+1]
+        ids = [t for t in ids if t != tokenizer.pad_token_id]
+        if not ids:
+            rows.append({'candidate': index, 'score': -1e9, 'token_ids': []})
+            continue
+        scores = []
+        for context in (prefix, prefix[-min(16, len(prefix)):]):
+            inputs = torch.tensor([context+ids], device=model.device)
+            positions = torch.arange(len(prefix)-len(context), len(prefix)+len(ids), device=model.device)[None]
+            labels = inputs.clone()
+            labels[:, :len(context)] = -100
+            logits = model(inputs, position_ids=positions, use_cache=False).logits
+            sums = loss_sums(logits, labels)[0]
+            scores.append(float((sums[0]/sums[1]).detach()))
+        content = [t for t in ids if t != tokenizer.eos_token_id]
+        grams = [tuple(content[i:i+4]) for i in range(max(0, len(content)-3))]
+        repeated = (len(grams)-len(set(grams)))/max(1, len(grams))
+        prompt_grams = {tuple(prefix[i:i+8]) for i in range(max(0, len(prefix)-7))}
+        echo = sum(tuple(content[i:i+8]) in prompt_grams for i in range(max(0, len(content)-7)))/max(1, len(content)-7)
+        gain = scores[1]-scores[0]
+        score = -scores[0]+.3*max(-2., min(2., gain))-4*repeated-2*echo
+        # Avoid selecting an immediate/near-immediate EOS just for high likelihood.
+        # This is a ranking penalty, never a forced minimum generation length.
+        score -= 2*max(0., 1-len(content)/min(24, max(map(len, candidates))))
+        if not content:
+            score = -1e9
+        rows.append({'candidate': index, 'score': score, 'conditional_nll': scores[0],
+                     'short_context_nll': scores[1], 'context_gain_nll': gain,
+                     'repeated_4gram_fraction': repeated, 'prompt_echo_fraction': echo,
+                     'token_ids': ids, 'continuation': tokenizer.decode(ids, skip_special_tokens=True)})
+    best = max(range(len(rows)), key=lambda i: rows[i]['score'])
+    return rows[best]['token_ids'], {'selected_candidate': best, 'candidates': rows,
+        'interpretation': 'Fluency, full-vs-short-context gain and repetition heuristics; not a coherence score.'}
+
+
+def rerank_generate(model, tokenizer, inputs, budget, candidates=8):
+    output = model.generate(inputs, attention_mask=inputs.new_ones(inputs.shape), do_sample=True,
+        num_return_sequences=candidates, max_new_tokens=budget, temperature=.8, top_p=.92, top_k=40,
+        repetition_penalty=1.08, pad_token_id=tokenizer.pad_token_id,
+        eos_token_id=tokenizer.eos_token_id, suppress_tokens=[tokenizer.pad_token_id], use_cache=True)
+    return rank_continuations(model, tokenizer, inputs[0].tolist(),
+                              [row[inputs.shape[1]:].tolist() for row in output])
+
+
 def generate_samples(model, tokenizer, prompts, max_new_tokens=96, seed=1234,
                      modes=("greedy", "sample"), include_token_ids=False):
     import torch
@@ -1604,7 +1887,7 @@ def generate_samples(model, tokenizer, prompts, max_new_tokens=96, seed=1234,
                     raise ValueError("Prompt fills the context window; shorten it")
                 inputs = torch.tensor([ids], dtype=torch.long, device=device)
                 for mode in modes:
-                    if mode not in {"greedy", "sample", "blocked_sample", "contrastive"}:
+                    if mode not in {"greedy", "sample", "blocked_sample", "contrastive", "reranked"}:
                         raise ValueError(f"Unknown decoding mode: {mode}")
                     kwargs = dict(max_new_tokens=min(max_new_tokens, room),
                                   do_sample=mode in {"sample", "blocked_sample"}, use_cache=True,
@@ -1614,16 +1897,23 @@ def generate_samples(model, tokenizer, prompts, max_new_tokens=96, seed=1234,
                         kwargs.update(temperature=.8, top_p=.92, top_k=40, repetition_penalty=1.08)
                     if mode == "blocked_sample":
                         kwargs["no_repeat_ngram_size"] = 4
-                    if mode == "contrastive":
+                    ranking = None
+                    if mode == "reranked":
+                        tokens, ranking = rerank_generate(model, tokenizer, inputs, min(max_new_tokens, room),
+                            getattr(model.config, 'coherence_decoding', {}).get('candidates', 8))
+                    elif mode == "contrastive":
                         output = contrastive_generate(model, inputs, min(max_new_tokens, room),
                                                       tokenizer.pad_token_id, tokenizer.eos_token_id)
                     else:
                         output = model.generate(inputs, attention_mask=torch.ones_like(inputs), **kwargs)
-                    tokens = output[0, len(ids):].tolist()
+                    if mode != "reranked":
+                        tokens = output[0, len(ids):].tolist()
                     row = {"prompt": prompt, "mode": mode,
                            "continuation": tokenizer.decode(tokens, skip_special_tokens=True)}
                     if include_token_ids:
                         row["token_ids"] = tokens
+                    if ranking is not None:
+                        row['ranking'] = ranking
                     results.append(row)
     finally:
         model.train(was_training)
@@ -1783,6 +2073,7 @@ def training(args):
     fixed_budget = getattr(args, "fixed_budget", False)
     scene_recipe = getattr(args, "scene_recipe", None)
     winter_recipe = getattr(args, "winter_recipe", None)
+    coherence_config = (winter_recipe or {}).get('coherence')
     attention_dropout = getattr(args, "attention_dropout", .1)
     if (args.resume or args.continue_from) and args.rebuild:
         raise ValueError("Do not rebuild a dataset while resuming or continuing an existing model")
@@ -1899,7 +2190,9 @@ def training(args):
     if scene_recipe and scene_recipe["treatment"]:
         train_set = SceneReplayDataset(train_set, args.scene_records, tokenizer.eos_token_id, args.seed)
     if winter_recipe:
-        supplementary = BookWindows(args.winter_train_path, args.block_size, args.train_limit,
+        review_block = 512 if coherence_config else args.block_size
+        review_training_data = BookWindows(data/'train.jsonl', review_block, args.train_limit)
+        supplementary = BookWindows(args.winter_train_path, review_block, args.train_limit,
                                     random_offsets=True, seed=args.seed)
         # Check copying against BOTH pools, including for baseline/control prose.
         review_training_data = combined_book_windows(review_training_data, supplementary)
@@ -1911,7 +2204,9 @@ def training(args):
                                            random_offsets=True, seed=args.seed, lookback=lookback)
         if winter_recipe["treatment"]:
             train_set = WinterReplayDataset(train_set, supplementary, args.seed)
-    val_set = BookWindows(data / "validation.jsonl", args.block_size, args.eval_limit)
+    if coherence_config:
+        train_set = CoherenceDataset(train_set, tokenizer)
+    val_set = BookWindows(data / "validation.jsonl", 512 if coherence_config else args.block_size, args.eval_limit)
     effective_batch = args.batch_size * args.accumulation
     origin = "Continued" if continuation is not None else "Random"
     print(f"{origin} GPT-2: {parameters:,} parameters; {len(train_set):,} training examples; "
@@ -1927,7 +2222,8 @@ def training(args):
     class SampleCallback(TrainerCallback):
         def on_step_end(self, training_args, state, control, **kwargs):
             if state.global_step % args.sample_steps == 0 and state.is_world_process_zero:
-                samples = generate_samples(kwargs["model"], tokenizer, PROMPTS, args.sample_tokens)
+                modes = ('greedy', 'sample', 'reranked') if coherence_config else ('greedy', 'sample')
+                samples = generate_samples(kwargs["model"], tokenizer, PROMPTS, args.sample_tokens, modes=modes)
                 with (out / "samples.jsonl").open("a", encoding="utf-8") as handle:
                     for sample in samples:
                         handle.write(json.dumps({"step": state.global_step, **sample}, ensure_ascii=False) + "\n")
@@ -1948,6 +2244,7 @@ def training(args):
         dataloader_num_workers=0, dataloader_pin_memory=use_cuda,
         seed=model_seed, data_seed=args.seed, report_to="none", save_safetensors=True,
         restore_callback_states_from_checkpoint=True,
+        remove_unused_columns=not bool(coherence_config),
     )
     callbacks = [window_epoch_callback(train_set), SampleCallback()]
     capacity_hook = None
@@ -1959,7 +2256,8 @@ def training(args):
                                               early_stopping_threshold=.002))
     trainer = training_trainer(
         model=model, args=training_args, train_dataset=train_set, eval_dataset=val_set,
-        data_collator=CausalCollator(tokenizer.pad_token_id), processing_class=tokenizer,
+        data_collator=(CoherenceCollator if coherence_config else CausalCollator)(tokenizer.pad_token_id),
+        processing_class=tokenizer, coherence_config=coherence_config,
         preprocess_logits_for_metrics=loss_sums, compute_metrics=token_metrics,
         callbacks=callbacks)
     planned_steps = args.max_steps if args.max_steps > 0 else math.ceil(
@@ -2016,7 +2314,7 @@ def training(args):
     trainer.remove_callback(EarlyStoppingCallback)
     metrics = {}
     if not args.skip_test:
-        test_set = BookWindows(data / "test.jsonl", args.block_size, args.eval_limit)
+        test_set = BookWindows(data / "test.jsonl", 512 if coherence_config else args.block_size, args.eval_limit)
         metrics = trainer.evaluate(test_set, metric_key_prefix="test")
     summary = {"parameters": parameters, "best_checkpoint": trainer.state.best_model_checkpoint,
                "best_validation_nll": trainer.state.best_metric, "global_step": trainer.state.global_step,
@@ -2208,6 +2506,10 @@ def atomic_json(path, value):
 def training_exposure(dataset, effective_batch, steps, seed):
     """Exact target count, including short book tails and a partial last update."""
     import torch
+    if isinstance(dataset, CoherenceDataset):
+        result = training_exposure(dataset.base, effective_batch, steps, seed)
+        result['target_count_scope'] = 'Positive source-token CE only; auxiliary negatives and curriculum weights excluded.'
+        return result
     if isinstance(dataset, (SceneReplayDataset, WinterReplayDataset)):
         return dataset.exposure(effective_batch, steps, seed)
     lengths = [dataset.scored_targets(i) for i in range(len(dataset))]
@@ -2481,10 +2783,27 @@ def run_capacity_review(model, tokenizer, benchmark, training_data, destination,
         result["training_copy"] = match
         result["longest_training_copy_tokens"] = match["matched_tokens"]
     context_use = score_context_use(model, benchmark) if benchmark.get("context_probe_tokens") else None
+    reranked = []
+    if benchmark.get('reranked_prompts'):
+        for prompt in benchmark['prompts'][:benchmark['reranked_prompts']]:
+            for seed in benchmark['sampling_seeds']:
+                sample, = generate_samples(model, tokenizer, [prompt], benchmark['generation_tokens'], seed,
+                                            modes=('reranked',), include_token_ids=True)
+                content = [t for t in sample['token_ids'] if t not in {tokenizer.pad_token_id, tokenizer.eos_token_id}]
+                reranked.append({**sample, 'sample_id': f"{prompt['prompt_id']}-s{seed}-reranked",
+                                 'prompt_id': prompt['prompt_id'], 'book_id': prompt['book_id'],
+                                 'seed': seed, 'generated_tokens': len(content),
+                                 'ended_with_eos': bool(sample['token_ids'] and sample['token_ids'][-1] == tokenizer.eos_token_id),
+                                 **repetition_counts(content)})
+        for sample, match in zip(reranked, copied_training_spans([s['token_ids'] for s in reranked], training_data)):
+            sample['training_copy'] = match
+            sample['longest_training_copy_tokens'] = match['matched_tokens']
+        write_coherence_sheet(destination/'reranked_review.csv', reranked)
     report = {"step": step, "validation_nll": nll, "benchmark_sha256": json_digest(benchmark),
               "test_evaluated": False, "fixed_training_subset": training_score,
               "fixed_supplementary_subset": supplementary_score,
               "context_use": context_use,
+              "reranked_samples": reranked,
               "samples": results, "runtime_seconds": time.monotonic()-start,
               "copy_search": "Exact generated-only token spans >=32, searched within training books. "
               "Zero means no match detected by this rule, not proof of originality.",
@@ -3381,15 +3700,24 @@ def default_winter_source(root):
     return latest if latest.is_dir() else Path(root)/"runs/christmas-scenes/control/best"
 
 
+def coherence_settings(args):
+    return {'version': 1, 'positions': args.coherence_context,
+            'curriculum_fraction': args.curriculum_fraction,
+            'context_weight': args.context_loss_weight, 'context_margin': args.context_margin,
+            'unlikelihood_weight': args.unlikelihood_weight, 'unlikelihood_every': args.unlikelihood_every,
+            'unlikelihood_tokens': args.unlikelihood_tokens, 'rerank_candidates': args.rerank_candidates}
+
+
 def finetune_winter(args):
     """Continue project weights with an explicit, independently frozen expansion."""
     import gc
     import os
     import torch
     from transformers import AutoTokenizer, GPT2Config, GPT2LMHeadModel, set_seed
+    coherence = coherence_settings(args) if args.command == 'train-coherence' else None
 
     if args.corpus or args.rebuild or args.grow_layers or args.continuation_dropout is not None:
-        raise ValueError("finetune-winter fixes its source catalog, tokenizer, architecture and inherited dropout")
+        raise ValueError("Winter/coherence continuation fixes its source catalog, tokenizer, blocks and inherited dropout")
     if args.resume not in {None, "latest"}:
         raise ValueError("Use --resume without a checkpoint path for the winter experiment")
     if int(os.environ.get("WORLD_SIZE", "1")) != 1 or (
@@ -3409,7 +3737,9 @@ def finetune_winter(args):
     prepare(args)
     signature = dataset_signature(data)
     tokenizer = AutoTokenizer.from_pretrained(data/"tokenizer", local_files_only=True)
-    source = Path(args.continue_from or default_winter_source(ROOT)).resolve()
+    latest = ROOT/'runs/christmas-winter-v2/expanded/best'
+    default_source = latest if coherence and latest.is_dir() else default_winter_source(ROOT)
+    source = Path(args.continue_from or default_source).resolve()
     snapshot, material = out/"starting_model", out/"material"
     if out.resolve() == source or out.resolve() in source.parents:
         raise ValueError("Winter output must not contain or replace its source checkpoint")
@@ -3447,8 +3777,16 @@ def finetune_winter(args):
                                if (source/name).exists()), None)
             if provenance:
                 source_description["parent_provenance"] = json.loads(provenance.read_text())
-        if model.config.n_positions != 512:
+        if not coherence and model.config.n_positions != 512:
             raise ValueError("The reviewed winter experiment requires a context-512 project checkpoint")
+        if coherence:
+            previous = model
+            model, extension = extend_gpt2_context(previous, coherence['positions'])
+            if extension['changed']:
+                extension['verification'] = verify_depth_growth(previous, model, tokenizer)
+            source_description['context_extension'] = extension
+            model.config.coherence_decoding = {'candidates': coherence['rerank_candidates']}
+            del previous
         manifest, encoded = prepare_winter_material(
             data, Path(args.winter_cache or data.parent/"winter-data"), tokenizer, signature, args.offline)
     args.block_size = model.config.n_positions
@@ -3468,12 +3806,16 @@ def finetune_winter(args):
     benchmark["short_tokens"] = min(96, args.benchmark_tokens)
     benchmark["context_probe_tokens"] = min(64, args.benchmark_tokens)
     benchmark["context_probe_version"] = 1
+    if coherence:
+        benchmark['reranked_prompts'] = 1 if args.smoke_test else min(3, args.benchmark_prompts)
     if args.smoke_test:
         benchmark["training_eval_windows"] = 16
     recipe = {"version": 2, "manifest_sha256": json_digest(manifest),
               "train_sha256": manifest["train_sha256"], "new_example_fraction": .5,
               "lookback": args.winter_lookback,
               "prefix_loss": "preceding_context_only_masked; all_target_span_tokens_scored", "false_end_targets": False}
+    if coherence:
+        recipe['coherence'] = coherence
     settings = {k: getattr(args, k) for k in (
         "seed", "model_seed", "batch_size", "accumulation", "learning_rate", "warmup_ratio", "max_steps",
         "eval_steps", "sample_steps", "sample_tokens", "benchmark_steps", "precision", "smoke_test",
@@ -3502,6 +3844,27 @@ def finetune_winter(args):
                 "context measures context sensitivity, not coherence. No automatic coherence verdict.",
                 "control": "Optional same-initialization, same-update ordinary continuation. Target counts and "
                 "compute are not exactly matched; compare prose as well as losses."}}
+    if coherence:
+        plan['rationale'].update(
+            context='Extend positional embeddings and causal buffers to the configured length, copying old '
+                    'positions exactly. Added positions are tiled initialization requiring training. Validation '
+                    'and dropout-off review NLL still use 512-token windows.',
+            curriculum='Anneal bounded passage-simplicity weights to one over the first configured fraction '
+                       'of updates. Normalize within each pool per microbatch; no books or positive targets removed.',
+            context_objective='Weight 0.1 by default: hinge margin 0.2 nats/token, true vs different-book prefix '
+                              'for identical 64-token reference; 128-token contexts, dropout off, original CE retained.',
+            unlikelihood='Weight 0.1 by default: once every 8 optimizer updates, greedily generate up to 64 tokens '
+                         'from one training prefix; penalize only third+ occurrences of 8-token phrases. '
+                         'No generated text becomes a positive target. Actual negative counts are logged.',
+            decoding='Sample eight candidates, score fluency plus bounded full-vs-short-context gain, '
+                     'minus phrase repetition and prompt copying. Preserve raw prose and all candidate scores. '
+                     'This is a same-model heuristic, not an independent coherence judge.',
+            optimization='Single combined continuation; defaults batch 4 x accumulation 4, peak LR 3e-5, '
+                         '1000 updates, 3% warmup and cosine to 3e-6. Inherit dropout and transformer blocks. '
+                         'Longer positive spans approximately preserve the previous positive-target update budget. '
+                         'Auxiliary forwards/greedy mining add compute. Settings are hypotheses, not measured optima.',
+            control='Optional original-corpus-only branch; all five methods also apply to that branch. '
+                    'It isolates supplementary material, not the new objectives; budgets are not compute-matched.')
     if args.resume:
         if prior != plan or json.loads((out/"benchmark.json").read_text()) != benchmark:
             raise ValueError("Frozen winter settings, source weights, material or benchmark changed")
@@ -3514,9 +3877,9 @@ def finetune_winter(args):
         atomic_json(snapshot/"provenance.json", {"dataset_sha256": signature, "source": source_description})
         atomic_json(out/"benchmark.json", benchmark)
         atomic_json(out/"experiment.json", plan)
-    replay = ContextBookWindows(data/"train.jsonl", 512, args.train_limit, random_offsets=True,
+    replay = ContextBookWindows(data/"train.jsonl", args.block_size, args.train_limit, random_offsets=True,
                                 seed=args.seed, lookback=args.winter_lookback)
-    new = ContextBookWindows(material/"train.jsonl", 512, args.train_limit, random_offsets=True,
+    new = ContextBookWindows(material/"train.jsonl", args.block_size, args.train_limit, random_offsets=True,
                              seed=args.seed, lookback=args.winter_lookback)
     exposure = training_exposure(WinterReplayDataset(replay, new, args.seed),
                                 args.batch_size*args.accumulation, args.max_steps, args.seed)
@@ -3556,6 +3919,8 @@ def finetune_winter(args):
             "optimizer_skipped_steps", "applied_optimizer_updates")}
         results[name].update(best_model=str(out/name/"best"), **{k: summary["continuation"][k] for k in (
             "retained_initial_model", "initial_validation_nll")})
+        if coherence:
+            results[name]['last_model'] = str(out/name/'last')
         results[name]["context_use"] = {}
         for label, folder in (("initial", out/name/"initial"), ("selected", out/name/"best")):
             context_use = json.loads((folder/"coherence.json").read_text()).get("context_use")
@@ -3592,6 +3957,22 @@ def finetune_winter(args):
             if not path.exists():
                 write_coherence_sheet(path, rows)
     atomic_json(out/"review_key.json", key)
+    if coherence:
+        import shutil
+        # Preserve the trained outcome even when the auxiliary objectives worsen NLL.
+        # best/ remains explicitly NLL-selected; last/ is explicitly the final update.
+        for name in branches:
+            shutil.copytree(out/name/f'reviews/step-{args.max_steps}/model', out/name/'last', dirs_exist_ok=True)
+            (out/name/'last/README.md').write_text(
+                '# Christmasmodel: final coherence continuation\n\n'
+                f'Final optimizer step: {args.max_steps}. This is not a coherence-selected winner. '
+                'Original Christmas stories and approved winter selections; project weights and tokenizer only. '
+                'The base model was randomly initialized. See training_summary.json and supplementary_sources.json.\n\n'
+                'Training adds a simplicity curriculum, context ranking and generated-repetition unlikelihood; '
+                'the saved GPT-2 context has been trained at the configured length. '
+                'Candidate reranking is inference code in model.py; GGUF contains weights only. '
+                'Other inference engines do not automatically apply this reranker.\n', encoding='utf-8')
+        print(f"Final trained weights: {out/'expanded/last'}; best/ remains selected by validation NLL.", flush=True)
     print(f"Winter continuation finished: {out/'comparison.json'}. Review blind_best_full.csv and "
           "blind_final_full.csv; every periodic review retains exportable weights. Test not evaluated.", flush=True)
     return results
@@ -3826,14 +4207,19 @@ def inference(args):
         device = "cpu" if args.cpu else ("cuda" if torch.cuda.is_available() else
                                         "mps" if torch.backends.mps.is_available() else "cpu")
         model.to(device)
+        if args.rerank_candidates is not None:
+            model.config.coherence_decoding = {'candidates': args.rerank_candidates}
         modes = ("greedy", "sample") if args.decode_mode == "both" else (args.decode_mode,)
+        if args.decode_mode == 'both' and getattr(model.config, 'coherence_decoding', None):
+            modes += ('reranked',)
         for sample in generate_samples(model, tokenizer, [args.prompt], args.sample_tokens, args.seed, modes=modes):
             print(f"\n[{sample['mode']}] {sample['prompt']}{sample['continuation']}")
         return
     summary = json.loads((path / "training_summary.json").read_text())
     if summary["dataset_sha256"] != dataset_signature(args.data_dir):
         raise ValueError("Evaluation data/tokenizer differ from this model's training run")
-    dataset = BookWindows(Path(args.data_dir) / "test.jsonl", model.config.n_positions, args.eval_limit)
+    coherence = (summary.get('winter_recipe') or summary.get('run', {}).get('winter_recipe') or {}).get('coherence')
+    dataset = BookWindows(Path(args.data_dir) / "test.jsonl", 512 if coherence else model.config.n_positions, args.eval_limit)
     trainer = Trainer(model=model,
                       args=TrainingArguments(output_dir=str(path.parent / "evaluation"),
                                              per_device_eval_batch_size=args.batch_size,
@@ -3845,7 +4231,7 @@ def inference(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["prepare", "train", "finetune-winter", "finetune-scenes", "compare-capacity", "compare-dropout", "compare-windowing", "compare-depth", "diagnose",
+    parser.add_argument("command", choices=["prepare", "train", "train-coherence", "finetune-winter", "finetune-scenes", "compare-capacity", "compare-dropout", "compare-windowing", "compare-depth", "diagnose",
                                             "compare-decoding", "evaluate", "generate"])
     parser.add_argument("--corpus", help="Optional subset of the embedded Christmas URLs, as a Python sources list")
     parser.add_argument("--data-dir", default=str(ROOT / "data"))
@@ -3866,7 +4252,7 @@ def main(argv=None):
     parser.add_argument("--attention-dropout", type=float, default=None,
                         help="Attention dropout for fresh models (capacity: 0.05; train: 0.1)")
     parser.add_argument("--precision", choices=["auto", "fp32", "fp16", "bf16"], default="auto")
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--batch-size", type=int, help="Microbatch: coherence 4, other commands 8")
     parser.add_argument("--accumulation", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument("--warmup-ratio", type=float, default=None)
@@ -3904,6 +4290,19 @@ def main(argv=None):
     parser.add_argument("--winter-cache", help="Winter source download cache; defaults to winter-data beside --data-dir")
     parser.add_argument("--winter-lookback", type=int,
                         help="finetune-winter: preceding context tokens without duplicate loss (default 128; 0 for ablation)")
+    parser.add_argument('--coherence-context', type=int, choices=[512, 1024], default=1024,
+                        help='train-coherence: trained context extension; 512 disables extension')
+    parser.add_argument('--curriculum-fraction', type=float, default=.4,
+                        help='train-coherence: fraction of updates to anneal simplicity weights; 0 disables')
+    parser.add_argument('--context-loss-weight', type=float, default=.1,
+                        help='train-coherence: true-vs-unrelated-context loss weight; 0 disables')
+    parser.add_argument('--context-margin', type=float, default=.2)
+    parser.add_argument('--unlikelihood-weight', type=float, default=.1,
+                        help='train-coherence: generated repetition penalty weight; 0 disables')
+    parser.add_argument('--unlikelihood-every', type=int, default=8)
+    parser.add_argument('--unlikelihood-tokens', type=int, default=64)
+    parser.add_argument('--rerank-candidates', type=int,
+                        help='train-coherence/generate: candidate count (coherence defaults to 8)')
     parser.add_argument("--with-control", action="store_true",
                         help="finetune-winter: also run a same-start, same-update original-corpus control")
     parser.add_argument("--eval-limit", type=int, help="Diagnostic window cap; omitted for full evaluation")
@@ -3911,12 +4310,30 @@ def main(argv=None):
                         help="Maximum windows per train/validation split for diagnose")
     parser.add_argument("--prompt", default=PROMPTS[0])
     parser.add_argument("--decode-mode", default="both",
-                        choices=["both", "greedy", "sample", "blocked_sample", "contrastive"],
+                        choices=["both", "greedy", "sample", "blocked_sample", "contrastive", "reranked"],
                         help="Decoding method for generate; both preserves the original greedy/sample output")
     args = parser.parse_args(argv)
+    coherence = args.command == 'train-coherence'
     capacity = args.command == "compare-capacity"
     scenes = args.command == "finetune-scenes"
-    winter = args.command == "finetune-winter"
+    winter = args.command in {'finetune-winter', 'train-coherence'}
+    if args.batch_size is None:
+        args.batch_size = 4 if coherence else 8
+    if coherence:
+        args.block_size = args.coherence_context
+        if args.output_dir is None:
+            args.output_dir = str(ROOT/'runs/christmas-coherence')
+        if args.learning_rate is None:
+            args.learning_rate = 3e-5
+        if args.winter_lookback is None:
+            args.winter_lookback = 256 if args.coherence_context == 1024 else 128
+        args.rerank_candidates = 8 if args.rerank_candidates is None else args.rerank_candidates
+    if (not 0 <= args.curriculum_fraction <= 1 or not 0 <= args.context_loss_weight <= 1
+            or not 0 <= args.unlikelihood_weight <= 1 or not 0 <= args.context_margin <= 2
+            or args.unlikelihood_every < 1 or not 8 <= args.unlikelihood_tokens <= 256
+            or (args.rerank_candidates is not None and not 1 <= args.rerank_candidates <= 16)):
+        parser.error('Invalid coherence setting: fractions/weights 0..1, margin 0..2, interval >=1, '
+                     'generation length 8..256, candidates 1..16')
     defaults = {"min_success_rate": (1., .9), "dropout": (.05, .15),
                 "attention_dropout": (.05, .1), "warmup_ratio": (.02, .05),
                 "epochs": (40., 12.), "sample_steps": (500, 250),
@@ -3947,7 +4364,7 @@ def main(argv=None):
     if winter:
         args.winter_lookback = 128 if args.winter_lookback is None else args.winter_lookback
         if not 0 <= args.winter_lookback <= 256:
-            parser.error("--winter-lookback must be between 0 and 256 for the context-512 continuation")
+            parser.error("--winter-lookback must be between 0 and 256")
     if args.scene_review and not scenes:
         parser.error("--scene-review is for finetune-scenes")
     if scenes and (not 128 <= args.scene_min_tokens <= args.scene_max_tokens <= 510 or args.scenes_per_book <= 0):
@@ -3987,7 +4404,7 @@ def main(argv=None):
         training(args)
     elif args.command == "finetune-scenes":
         finetune_scenes(args)
-    elif args.command == "finetune-winter":
+    elif args.command in {'finetune-winter', 'train-coherence'}:
         finetune_winter(args)
     elif args.command == "compare-capacity":
         compare_capacity(args)

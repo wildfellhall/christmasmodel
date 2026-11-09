@@ -1,4 +1,4 @@
-"""Export the best checkpoint to Hugging Face format and a downloadable GGUF.
+"""Export a selected checkpoint to Hugging Face format and a downloadable GGUF.
 
 Paste this entire file into one Colab cell after training. Edit
 EXPORT_NOTEBOOK_ARGS below for your checkpoint/output paths. The pasted cell
@@ -29,12 +29,13 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
-# Pasted-cell defaults for the current winter continuation. Change --model-dir
+# Pasted-cell defaults for the completed coherence continuation. last/ is the
+# final update, not a claim of best coherence. Change --model-dir
 # to another best/ or retained review model if that is what you want to export.
 # Choose an empty output directory. Add --repo-id only to request a Hub upload.
 EXPORT_NOTEBOOK_ARGS = [
-    "--model-dir", "runs/christmas-winter-v2/expanded/best",
-    "--output-dir", "exports/christmas-winter-v2",
+    "--model-dir", "runs/christmas-coherence/expanded/last",
+    "--output-dir", "exports/christmas-coherence",
     "--setup", "--outtype", "f16", "--verify", "--download",
 ]
 # Inline equivalent of requirements-export.txt; no repository/helper file needed.

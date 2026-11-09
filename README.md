@@ -1,12 +1,57 @@
 # Christmasmodel
 
-Train literary continuation models from random weights on Gutenberg fiction. The pasted-cell default in [model.py](model.py) now continues an existing project model with the approved **pre-1920 winter/domestic expansion**, retaining the original Christmas corpus as replay. [export.py](export.py) packages Hugging Face weights and converts to GGUF.
+Train literary continuation models from random weights on Gutenberg fiction. The pasted-cell default in [model.py](model.py) now runs **five coherence interventions together** on an existing project model, using the original Christmas stories and all approved pre-1920 winter selections. [export.py](export.py) packages Hugging Face weights and converts to GGUF.
 
-The original commands retain the original Christmas-only restriction. The user's expanded scope is implemented explicitly by `finetune-winter`; it does not change old data, splits or tokenizer, or load outside pretrained weights.
+The original commands retain the original Christmas-only restriction. `finetune-winter` and `train-coherence` use the approved additions without changing old data, splits or token IDs, or loading outside pretrained weights.
 
-## Winter-fiction continuation v2 (current default)
+## Five coherence interventions (current default)
 
-**Paste the entire `model.py` into one Colab GPU cell.** The original 189 URLs, all 37 additional Gutenberg sources, exact selection boundaries, bibliographic evidence, dependencies, training and review code are inline. No clone, research ZIP or helper module is required. Restore the existing model weights and its original prepared `data/` directory first; reports ZIPs alone are insufficient.
+**Paste the entire `model.py` into one Colab GPU cell.** The source catalogs, dependencies and implementation are inline. The default runs one combined continuation; no experiment ZIP or extra script is required. Keep the project's existing weights and prepared data in the notebook runtime or mounted Drive.
+
+```python
+NOTEBOOK_ARGS = ["train-coherence", "--output-dir", "runs/christmas-coherence"]
+```
+
+It chooses `runs/christmas-winter-v2/expanded/best` if available, then `runs/christmas-winter/expanded/best`, then `runs/christmas-scenes/control/best`. `--continue-from` and `--data-dir` override these locations. Both 14M and 42M project checkpoints are supported; transformer blocks, vocabulary and dropout are inherited. Source weights remain intact. Start this stage in a new output directory; it cannot resume an old recipe's optimizer.
+
+These changes target separate failures visible in the earlier runs. **They are implemented hypotheses, not demonstrated fixes or optimized hyperparameters.** Low NLL and low repetition have already proved insufficient to establish narrative coherence here.
+
+| Plan | Implementation and parameter decision |
+| --- | --- |
+| **1. Simplicity curriculum** | Early loss weights favor shorter sentences, fewer long words and fewer capitalized names. This is a surface proxy, not a semantic quality label. Raw scores lie in 0.5–1.5; weights are normalized by scored targets within each corpus pool **per microbatch** and anneal to 1 over the first 40% of updates. All examples remain. Normalization preserves pool weight but can move individual weights outside the raw range. A pool with one example receives no relative reweighting. |
+| **2. Context discrimination** | Alongside ordinary next-token loss, rank the same 64-token real continuation under its true 128-token prefix versus another training book's prefix. Hinge margin **0.2 nats/token**, weight **0.1**. Paired forwards disable dropout but keep gradients. Only rows with enough context and another eligible book participate. These negatives can teach topic cues; they do not directly certify character or causal consistency. |
+| **3. Generated-repetition unlikelihood** | Every **8 updates**, greedily generate at most **64 tokens** from one training prefix. Penalize the final token of the **third and subsequent occurrences of an eight-token phrase**, weight **0.1**. Original-text cross-entropy remains the main objective; generated text never becomes a positive target. This conservative rule avoids penalizing every repeated word/name. Actual negative counts, including zero, are logged. It targets loops, not all semantic errors. |
+| **4. Train with longer context** | Extend GPT-2 to **1,024 positions**, rebuilding causal attention buffers. Copy old positions exactly and initialize new ones by tiling old embeddings; verify old-length logits before training. New positions then receive training. Include **256 context-only preceding tokens**, leaving up to **767 scored targets** per full row. Windows never cross books/ranges. More visible context enables continuity without guaranteeing its use. |
+| **5. Generate and rerank** | Sample **8 candidates** at temperature **0.8**, top-p **0.92**, top-k **40**, repetition penalty **1.08**. Rank by mean conditional log-probability, bounded full-versus-last-16-token context gain, and penalties for repeated four-grams, copied prompt eight-grams and very short output. Position IDs stay aligned for context comparisons. This same-model heuristic cannot fix an incoherent candidate pool. All candidate scores and ordinary output are retained. |
+
+Plan 3 uses the sequence-unlikelihood idea from [Welleck et al.](https://arxiv.org/abs/1908.04319), with this project's conservative negative rule. The context objective and reranking weights are project heuristics, not claims of reproducing a published coherence result.
+
+Defaults: **1,000 updates, microbatch 4 × accumulation 4**, fresh AdamW at peak LR **3e-5**, betas **0.9/0.95**, decay **0.1**, clipping **1**, **3% warmup**, cosine decay to **3e-6**. The lower LR limits disruption while adding objectives and position embeddings. Full batches score up to 12,272 positive targets versus the previous 12,256; tails affect actual totals. Extra forwards and generation add compute. BF16/FP16 selection and skipped-update accounting remain. Curriculum and margin use the accumulation-wide target denominator; unlikelihood runs once on its scheduled update.
+
+The 50/50 supplementary/original window mixture includes all approved material listed below. **Validation and dropout-off training diagnostics keep the old 512-token windows**, so longer training context cannot automatically lower comparison loss. No test-set model evaluation occurs. Logs expose `ce_nll`, `context_margin_loss`, `context_pairs`, `unlikelihood_loss`, and `unlikelihood_negative_tokens`. Checkpoint output includes greedy, sampled and reranked prose. Review retains ordinary samples on 20 frozen validation prefixes plus reranked samples on three prefixes, with copying checks against both training pools. These are diagnostics, not automatic coherence scores.
+
+Outputs:
+
+- **`expanded/last/`**: final update, even when validation NLL prefers earlier weights. Default export target; not a declared coherence winner.
+- **`expanded/best/`**: lowest-validation-NLL checkpoint, including eligibility of the starting weights.
+- **`expanded/reviews/step-N/model/`**: periodic weights; adjacent `coherence.json` and `reranked_review.csv` contain prose and candidate scores.
+- `experiment.json`: frozen methods/settings; `comparison.json`: final and NLL-selected paths. Target exposure counts original positive labels, excluding auxiliary negatives and curriculum weights.
+
+Resume with `--resume`, keeping other settings and omitting `--continue-from` if previously supplied. The frozen source snapshot/material are reused. For inference:
+
+```bash
+python model.py generate --model-dir runs/christmas-coherence/expanded/last --decode-mode reranked --prompt "Mary heard a knock at the door. She put down her book and"
+```
+
+Disable methods with `--curriculum-fraction 0`, `--context-loss-weight 0`, `--unlikelihood-weight 0`, `--coherence-context 512`, or inference `--decode-mode sample`. Changing training settings requires a new output directory. Optional `--with-control` adds an original-corpus-only branch **with the same five methods**; default is just the combined branch.
+
+**Export:** paste all of `export.py` after training. Notebook defaults select `runs/christmas-coherence/expanded/last`, write `exports/christmas-coherence`, verify and download F16 GGUF. Upload remains opt-in through `--repo-id`. **Reranking lives in `model.py`, not GGUF**; other inference engines need equivalent candidate selection to reproduce it.
+
+**85 tests pass**, covering old-context logit preservation, new-position and auxiliary gradients, accumulation scaling, exact interrupted/resumed training, candidate provenance, and the complete three-update save/recovery path. These small execution tests do not establish full-size prose quality or full Colab GPU execution.
+
+## Winter-fiction continuation v2 (previous recipe)
+
+To repeat this earlier recipe, paste the entire `model.py` into one Colab GPU cell and set `NOTEBOOK_ARGS` as below. The original 189 URLs, all 37 additional Gutenberg sources, exact selection boundaries, bibliographic evidence, dependencies, training and review code are inline. Existing project weights and their prepared `data/` directory are required.
 
 The default source is `runs/christmas-winter/expanded/best` when that directory exists, otherwise `runs/christmas-scenes/control/best`. The chosen path is printed and its provenance/tokenizer verified before training. Explicit `--continue-from` always takes precedence. A different project checkpoint, including the 42M model or a prose-reviewed snapshot, can be supplied. Its tokenizer, context length of 512, architecture and dropout are checked/inherited. This is a new stage in **`runs/christmas-winter-v2`**; an older optimizer run cannot be resumed with this changed corpus and recipe.
 
@@ -96,7 +141,7 @@ Outputs include:
 - `expanded/reviews/step-N/model/`: retained weights at each review, independently selectable for prose quality.
 - `comparison.json`, `blind_best_full.csv`, `blind_final_full.csv`, corresponding short panels, and `review_key.json`: losses, initial/selected context-use summaries, and blind baseline/treatment comparisons. Human ratings are preserved on completed resume. No automatic coherence winner is declared. Full paired diagnostic details are in each `coherence.json`.
 
-The existing `export.py` accepts the best or any review model and carries `supplementary_sources.json` into the HF package. **For one-cell usage, paste all of `export.py` into Colab after training.** Its `EXPORT_NOTEBOOK_ARGS` defaults to `runs/christmas-winter-v2/expanded/best`, exports to `exports/christmas-winter-v2`, installs dependencies, sets up the pinned converter, verifies F16 output and downloads GGUF. Edit those paths near the top if needed. The cell uses explicit arguments, so Jupyter's internal `-f .../kernel.json` is never parsed. It does not upload unless you add `--repo-id`.
+`export.py` accepts the best or any review model and carries `supplementary_sources.json` into the HF package. For this older recipe, change `EXPORT_NOTEBOOK_ARGS` to select `runs/christmas-winter-v2/expanded/best` and an unused export directory. The cell uses explicit arguments, so Jupyter's internal `-f .../kernel.json` is never parsed. It does not upload unless you add `--repo-id`.
 
 With a repository checkout, the explicit `%run` command remains:
 
