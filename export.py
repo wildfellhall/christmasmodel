@@ -254,7 +254,7 @@ def export_model(args):
     hf_dir.mkdir(parents=True)
     model.save_pretrained(hf_dir, safe_serialization=True)
     tokenizer.save_pretrained(hf_dir)
-    for name in ("README.md", "training_summary.json", "samples.json"):
+    for name in ("README.md", "training_summary.json", "samples.json", "supplementary_sources.json"):
         if (source / name).exists():
             shutil.copy2(source / name, hf_dir / name)
     del model

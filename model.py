@@ -5,11 +5,11 @@ one code cell, and run it. Dependencies are installed and training starts using
 the source list embedded below. No repository clone or corpus.py is required.
 Edit NOTEBOOK_ARGS below to change options or resume a notebook run.
 
-The default pasted cell runs finetune-scenes from the existing best 14M model:
-ordinary continuation versus original-text scene candidates plus corpus replay.
+The default pasted cell runs finetune-winter from the existing best 14M model:
+selected pre-1920 winter domestic fiction plus original Christmas corpus replay.
 Keep the original prepared data and checkpoint available; nothing is rebuilt.
 Use --plan-only to inspect the budget, --smoke-test for a tiny execution check,
-and --resume to recover the pair without restarting completed branches.
+and --resume to recover without restarting completed branches.
 
 Colab GPU runtime, separate cells:
     !git clone https://github.com/wildfellhall/christmasmodel.git
@@ -18,8 +18,9 @@ Colab GPU runtime, separate cells:
     !python model.py train
     !python model.py generate --prompt "On Christmas Eve, the snow"
 
-Training uses only the Christmas books listed below, from random weights.
-No pretrained model or tokenizer is used. --corpus may select a subset of these URLs.
+The base models use random weights. No external pretrained weights or tokenizer
+are loaded. finetune-winter explicitly adds the inline WINTER_SOURCES selections;
+the older commands retain their original Christmas-only data restrictions.
 """
 from __future__ import annotations
 
@@ -36,11 +37,11 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
-# Option 1: continue the existing 14M best checkpoint on intact scene candidates.
-# Default source: runs/christmas-capacity/14m/best. Override --continue-from if
+# Continue the latest 14M control with the approved winter-fiction expansion.
+# Default source: runs/christmas-scenes/control/best. Override --continue-from if
 # your files are on Drive. Add --resume after a disconnect (omit --continue-from).
 # For Colab persistence, set --data-dir and --output-dir to mounted Drive paths.
-NOTEBOOK_ARGS = ["finetune-scenes", "--output-dir", "runs/christmas-scenes"]
+NOTEBOOK_ARGS = ["finetune-winter", "--output-dir", "runs/christmas-winter"]
 NOTEBOOK_REQUIREMENTS = [
     "torch>=2.6,<3", "transformers==4.57.6", "tokenizers==0.22.2", "accelerate==1.12.0",
     "huggingface-hub==0.36.2", "numpy>=1.26,<3", "requests>=2.32,<3", "safetensors>=0.4",
@@ -251,6 +252,367 @@ PROMPTS = [
 ]
 CLEANING_VERSION = 1
 
+
+
+# Reviewed pre-1920 additions, used ONLY by finetune-winter. All URLs,
+# bibliographic evidence, exact boundaries and content hashes are inline for Colab.
+WINTER_SOURCES = [{'id': '32090',
+  'title': 'The Curlytops Snowed In; Or, Grand Fun with Skates and Sleds',
+  'url': 'https://www.gutenberg.org/cache/epub/32090/pg32090.txt',
+  'date': '1918',
+  'date_evidence': 'Original copyright 1918 in Gutenberg front matter; transcribed printing also shows 1941. '
+                   'Original year qualifies; exclude later publisher lists.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/32090/pg32090-images.html'],
+  'note': 'Baby-talk, animal antics, rescue subplot, sequel references and publisher advertisements. Sampled '
+          'passages only; not a fully reviewed curriculum.',
+  'selections': [{'start': '^CHAPTER I$',
+                  'end': '^THE END\\.?$',
+                  'natural_end': True,
+                  'sha256': 'cbd344965921f93ae939981d69a7a0fe4cbfc6b2dad391c496c6f1e8bb28d665',
+                  'words': 45084}]},
+ {'id': '17761',
+  'title': "Six little Bunkers at Grandpa Ford's",
+  'url': 'https://www.gutenberg.org/cache/epub/17761/pg17761.txt',
+  'date': '1918',
+  'date_evidence': 'Copyright 1918 in Gutenberg front matter.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/17761/pg17761-images.html'],
+  'note': 'Six children plus adults increase cast size; repeated series recap, mystery thread, dialect, '
+          'publisher advertisements. Select bounded exchanges.',
+  'selections': [{'start': '^CHAPTER I$',
+                  'end': '^THE END\\.?$',
+                  'natural_end': True,
+                  'sha256': '3a0d4ce44a548cc5e7c4a6c436fd0e7e39b4f1311a2a0d9ec2e8fc335c129ee3',
+                  'words': 42470}]},
+ {'id': '6055',
+  'title': 'The Bobbsey Twins at Snow Lodge',
+  'url': 'https://www.gutenberg.org/cache/epub/6055/pg6055.txt',
+  'date': '1913',
+  'date_evidence': 'Copyright 1913 in Gutenberg front matter.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/6055/pg6055-images.html'],
+  'note': 'Mystery plot, period dialect and stereotypes, series recap; review scene boundaries rather than '
+          'blindly taking windows.',
+  'selections': [{'start': '^CHAPTER I$',
+                  'end': '^THE END\\.?$',
+                  'natural_end': True,
+                  'sha256': 'b021939b59798af70a9d282cd8c48887b5bc5c96174fdb014458775abdbf2038',
+                  'words': 36332}]},
+ {'id': '2786',
+  'title': 'Jack and Jill',
+  'url': 'https://www.gutenberg.org/cache/epub/2786/pg2786.txt',
+  'date': '1880',
+  'date_evidence': 'Dedication dated 1880; Gutenberg catalog describes 1879-1880 serialization.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/2786/pg2786-images.html',
+                   'https://www.gutenberg.org/ebooks/2786'],
+  'note': 'Longer sentences and larger cast than youngest-reader books; later chapters move into '
+          'spring/summer. Prefer winter chapters and complete scenes.',
+  'selections': [{'start': '^Chapter I\\. The Catastrophe$',
+                  'end': '^Chapter XIII\\. Jack Has a Mystery$',
+                  'natural_end': False,
+                  'sha256': 'f879a279321fd18a0eedccec805fcfe03ddcd9cf00d5155f70a2cb09c76e30bb',
+                  'words': 43162}]},
+ {'id': '5347',
+  'title': 'Understood Betsy',
+  'url': 'https://www.gutenberg.org/cache/epub/5347/pg5347.txt',
+  'date': 'by 1917',
+  'date_evidence': 'NYPL scanned edition cataloged c1917 and visible copyright evidence says 1917; Gutenberg '
+                   'automated summary says 1916. Pre-1920 status verified; exact earliest issue date not '
+                   'resolved.',
+  'date_sources': ['https://archive.org/details/understoodbetsy00fish',
+                   'https://www.gutenberg.org/ebooks/5347'],
+  'note': 'Not winter throughout; intrusive narrator and longer introspective passages. Select concrete '
+          'household scenes.',
+  'selections': [{'start': '^CHAPTER I$',
+                  'end': '^CHAPTER VIII$',
+                  'natural_end': False,
+                  'sha256': 'f19e1301e964e19bbf0398ea42a535973a412c9c5386be7881f2dbf39190e461',
+                  'words': 27805},
+                 {'start': '^CHAPTER XI$',
+                  'end': '^THE END\\.$',
+                  'natural_end': True,
+                  'sha256': 'd2edb98b7e0acd489229f9282efc32e20e2a11a1bda87450c691b040142b7dd7',
+                  'words': 6493}]},
+ {'id': '514',
+  'title': 'Little Women',
+  'url': 'https://www.gutenberg.org/cache/epub/514/pg514.txt',
+  'date': '1868-1869',
+  'date_evidence': 'Library of Congress dates first volume to 1868 and second to the following year.',
+  'date_sources': ['https://www.loc.gov/item/today-in-history/november-29/'],
+  'note': 'Much of the novel is not winter; varied registers, verse, embedded theatrical/newspaper material '
+          'and adult courtship. Use selected winter/domestic chapters rather than bulk inclusion.',
+  'selections': [{'start': '^CHAPTER ONE$',
+                  'end': '^CHAPTER TEN$',
+                  'natural_end': False,
+                  'sha256': 'e2fd5f41479e714b8771123907868c38c25d2af69c4dd715d1d071dfcbb7bdb5',
+                  'words': 37109},
+                 {'start': '^CHAPTER FIFTEEN$',
+                  'end': '^PART 2$',
+                  'natural_end': False,
+                  'sha256': '39657afbc52999e6d1483cd8bad6cdaeda34b3b16b4e978f9e82af23160d6e52',
+                  'words': 29311}]},
+ {'id': '17878',
+  'title': 'Bunny Brown and his Sister Sue Giving a Show',
+  'url': 'https://www.gutenberg.org/cache/epub/17878/pg17878.txt',
+  'date': '1919',
+  'date_evidence': 'Copyright 1919 in the transcribed edition.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/17878/pg17878.txt'],
+  'note': 'Series recap, theatrical mystery subplot, occasional dialect; select complete scenes rather than '
+          'arbitrary windows.',
+  'selections': [{'start': '^CHAPTER I$',
+                  'end': '^THE END\\.$',
+                  'natural_end': True,
+                  'sha256': '1d6ad51e9da28bd80aec795b5919dad583c9b7822ea5c8a36e20edc8d4f6845a',
+                  'words': 44349}]},
+ {'id': '18420',
+  'title': 'The Bobbsey Twins at Home',
+  'url': 'https://www.gutenberg.org/cache/epub/18420/pg18420.txt',
+  'date': '1916',
+  'date_evidence': 'Copyright 1916 in the transcribed edition.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/18420/pg18420.txt'],
+  'note': 'Begins before winter; multiple children, series recap, dialect and a missing-family subplot.',
+  'selections': [{'start': '^CHAPTER I$',
+                  'end': "^Transcriber's notes:$",
+                  'natural_end': True,
+                  'sha256': 'b3259b88f13941abd057e7d0d811bd6c938be9d8c0de7519c06141839bdfc215',
+                  'words': 43014}]},
+ {'id': '48951',
+  'title': 'Dotty Dimple at School',
+  'url': 'https://www.gutenberg.org/cache/epub/48951/pg48951.txt',
+  'date': '1869',
+  'date_evidence': 'Title page and copyright both 1869.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/48951/pg48951.txt'],
+  'note': 'Child speech, moralizing and frightening peril. Same author/series family as existing sources: '
+          'preserve held-out boundaries.',
+  'selections': [{'start': '^CHAPTER I\\.$',
+                  'end': '^Transcriber’s Notes:$',
+                  'natural_end': True,
+                  'sha256': '538fa197ba0230d6d34214999128c4e3acd8378e85580d9f0e596bef5d0e1763',
+                  'words': 20980}]},
+ {'id': '4012',
+  'title': 'The Dutch Twins',
+  'url': 'https://www.gutenberg.org/cache/epub/4012/pg4012.txt',
+  'date': '1911',
+  'date_evidence': 'NYPL scanned edition catalogued c1911; copyright inspection explicitly confirms 1911.',
+  'date_sources': ['https://archive.org/details/dutchtwins00perk'],
+  'note': 'Earlier chapters are not winter-specific. Educational framing and embedded folklore; teacher '
+          'instructions excluded.',
+  'selections': [{'start': '^VI\\n\\nTHE DAY THEY GOT THEIR SKATES$',
+                  'end': '^SUGGESTIONS TO TEACHERS$',
+                  'natural_end': True,
+                  'sha256': '0370c4723d9b6032d4b77088b1a3a36df628f155b67b932d9d52518f4d31fe2b',
+                  'words': 6801}]},
+ {'id': '43638',
+  'title': 'Our Little Swedish Cousin',
+  'url': 'https://www.gutenberg.org/cache/epub/43638/pg43638.txt',
+  'date': '1906',
+  'date_evidence': 'Copyright 1906 and first impression July 1906.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/43638/pg43638.txt'],
+  'note': 'Fictional educational travelogue: exclude geographical/historical exposition and unrelated '
+          'seasons.',
+  'selections': [{'start': '^CHAPTER I\\.$',
+                  'end': '^CHAPTER IV$',
+                  'natural_end': False,
+                  'sha256': '51d40c4aab147a740fc5008e7f2302164913faca846d1bd491180ce91c07ff56',
+                  'words': 6461}]},
+ {'id': '43249',
+  'title': 'Our Little Canadian Cousin',
+  'url': 'https://www.gutenberg.org/cache/epub/43249/pg43249.txt',
+  'date': '1904',
+  'date_evidence': 'Copyright 1904, published July 1904; transcribed fifth impression June 1908.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/43249/pg43249.txt'],
+  'note': 'Fictional educational travelogue; keep domestic episodes rather than all descriptive material.',
+  'selections': [{'start': '^CHAPTER VI\\.$',
+                  'end': '^CHAPTER X\\.$',
+                  'natural_end': False,
+                  'sha256': 'af1e975c6ed77cb75a5366ba4a4a04dccf4bb6341cd75c4c90d2fb81dbd03fa9',
+                  'words': 7719}]},
+ {'id': '42079',
+  'title': 'Mari, Our Little Norwegian Cousin',
+  'url': 'https://www.gutenberg.org/cache/epub/42079/pg42079.txt',
+  'date': '1903',
+  'date_evidence': 'Copyright 1903; later impressions dated 1908 and 1910.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/42079/pg42079.txt'],
+  'note': 'Fictional educational travelogue; substantial fishing, geography and folklore digressions.',
+  'selections': [{'start': '^CHAPTER VII\\.$',
+                  'end': '^CHAPTER IX\\.$',
+                  'natural_end': False,
+                  'sha256': 'cd5503a3bb5a8e9bf60f866d5dfa8206c3170d15d8a7b4b5241bedffc633ff4b',
+                  'words': 4481},
+                 {'start': '^CHAPTER X\\.$',
+                  'end': '^THE END\\.$',
+                  'natural_end': True,
+                  'sha256': 'e0d6f69f99d5dfcdc032d43b5f0f96388e4c6f545e5494d1e16348c3a62fedd4',
+                  'words': 832}]},
+ {'id': '43426',
+  'title': 'Our Little Finnish Cousin',
+  'url': 'https://www.gutenberg.org/cache/epub/43426/pg43426.txt',
+  'date': '1918',
+  'date_evidence': 'Copyright and first impression 1918; second 1919; transcribed third impression 1930.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/43426/pg43426.txt'],
+  'note': 'Later printing: verify selected passages against an early edition before training if exact '
+          'pre-1920 wording is required. Exclude political preface, exposition and later advertisements.',
+  'selections': [{'start': '^CHAPTER I$',
+                  'end': '^CHAPTER IV$',
+                  'natural_end': False,
+                  'sha256': '00a310c7fd6e53c6c0c367af2a383f51877a019c29b1cc8fee25565e28d4993f',
+                  'words': 5699},
+                 {'start': '^CHAPTER V$',
+                  'end': '^CHAPTER VIII$',
+                  'natural_end': False,
+                  'sha256': '9caed20dad80097e0934d50666800699f5c240e319439fb8b5423b0f155d61cc',
+                  'words': 5977}]},
+ {'id': '20781',
+  'title': 'Heidi',
+  'url': 'https://www.gutenberg.org/cache/epub/20781/pg20781.txt',
+  'date': '1915 English translation; 1919 edition',
+  'date_evidence': 'Elisabeth P. Stork translation copyright 1915; Gift Edition title page and additional '
+                   'illustrations 1919.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/20781/pg20781.txt'],
+  'note': 'All-season novel with larger plot, religious passages and verse; select winter scenes. This date '
+          'verifies the English text, not just the German original.',
+  'selections': [{'start': "^IV\\n\\nIN THE GRANDMOTHER'S HUT$",
+                  'end': '^V\\n\\nTWO VISITORS$',
+                  'natural_end': False,
+                  'sha256': '142c7b8dde31279ea419a2dd206019ab9e0c8ccc94210769aa793564ac221de1',
+                  'words': 2697},
+                 {'start': '^XVIII\\n\\nWINTER IN THE VILLAGE$',
+                  'end': '^XX\\n\\nNEWS FROM DISTANT FRIENDS$',
+                  'natural_end': False,
+                  'sha256': '9b9edcfa716f8836c4c9f704ad7faddca16ecaf607a784117cd98e1d1c8c71cb',
+                  'words': 3662}]},
+ {'id': '5141',
+  'title': 'What Katy Did at School',
+  'url': 'https://www.gutenberg.org/cache/epub/5141/pg5141.txt',
+  'date': '1873',
+  'date_evidence': 'Tufts rare-book exhibit dates the work 1873 and its exhibited edition 1876.',
+  'date_sources': ['https://exhibits.tufts.edu/spotlight/girls-books/catalog/32-2486'],
+  'note': 'Boarding-school rather than home setting; letters, verse and longer sentences need selection.',
+  'selections': [{'start': '^CHAPTER XI\\. CHRISTMAS BOXES\\.$',
+                  'end': '^CHAPTER XIII\\. PARADISE REGAINED\\.$',
+                  'natural_end': False,
+                  'sha256': '789809adf17d13aa537300863f5b80cbad52b50c41ac2777d787f4565eee94ec',
+                  'words': 7014}]},
+ {'id': '5632',
+  'title': 'Five Little Peppers Midway',
+  'url': 'https://www.gutenberg.org/cache/epub/5632/pg5632.txt',
+  'date': '1890',
+  'date_evidence': 'New West Press identifies first publication as 1890 and its source edition as 1893; '
+                   'corroborated by series bibliography.',
+  'date_sources': ['https://newwestpress.com/products/copy-of-five-little-peppers-midway',
+                   'https://19thcenturyjuvenileseries.com/series/flp_lothrop.html'],
+  'note': 'Not winter throughout; larger cast and period dialect. Ben Pepper is already in the original '
+          'training corpus.',
+  'selections': [{'start': "^I\\n\\nPHRONSIE'S PIE$",
+                  'end': '^XI\\n\\nPOOR POLLY!$',
+                  'natural_end': False,
+                  'sha256': '0054773b7e07d481c06536ee72e6efc82ce1ee5d359bd6d012292ea429d6d595',
+                  'words': 27777}]},
+ {'id': '15169',
+  'title': 'The Bobbsey Twins in a Great City',
+  'url': 'https://www.gutenberg.org/cache/epub/15169/pg15169.txt',
+  'date': '1917',
+  'date_evidence': 'Copyright 1917 in the transcribed edition.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/15169/pg15169.txt'],
+  'note': 'More adventure and urban sightseeing than domestic fiction; lower priority than Bobbsey Twins at '
+          'Home.',
+  'selections': [{'start': '^CHAPTER I$',
+                  'end': '^CHAPTER VI$',
+                  'natural_end': False,
+                  'sha256': 'ab5697d655b012568672930ddfa2ebc4f859b54d9cc2b6c4c50c7fea5d9c2a94',
+                  'words': 9969},
+                 {'start': '^CHAPTER XXI$',
+                  'end': '^THE END$',
+                  'natural_end': True,
+                  'sha256': 'c8576a297e530d08d3c8ae9b94eec18d7d320e8a744a0a181e0329ff0c111ade',
+                  'words': 3461}]},
+ {'id': '26041',
+  'title': "Aunt Jo's scrap bag, Volume 1 My boys, etc.",
+  'url': 'https://www.gutenberg.org/cache/epub/26041/pg26041.txt',
+  'date': '1892 edition; preface 1871-72',
+  'date_evidence': 'Transcribed edition title page 1892, with preface dated Christmas Holidays 1871-72; '
+                   "safely pre-1920 without inferring each story's original publication year.",
+  'date_sources': ['https://www.gutenberg.org/cache/epub/26041/pg26041.txt'],
+  'note': 'Use only the named complete stories. Poverty and moral instruction; retain original prose without '
+          'rewriting it.',
+  'selections': [{'start': "^_TESSA'S SURPRISES\\._$",
+                  'end': '^_BUZZ\\._$',
+                  'natural_end': True,
+                  'sha256': '9e97778f9a90f05c9b4d777b3feef0710d8f3d7d9739b073100d12ac0907559e',
+                  'words': 4403},
+                 {'start': "^_TILLY'S CHRISTMAS\\._$",
+                  'end': '^_MY LITTLE GENTLEMAN\\._$',
+                  'natural_end': True,
+                  'sha256': 'e7f0c730bda2adc03c5cb75311883c152547400bb672ab89afdbb4cf9e00010d',
+                  'words': 1981}]},
+ {'id': '57309',
+  'title': "Aunt Jo's scrap-bag, Volume 3 Cupid and Chow-chow, etc.",
+  'url': 'https://www.gutenberg.org/cache/epub/57309/pg57309.txt',
+  'date': '1873 collection copyright',
+  'date_evidence': 'Copyright registration 1873; transcribed title page 1896.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/57309/pg57309.txt'],
+  'note': 'Family Christmas story with several relatives and a longer setup; do not add the unrelated '
+          'stories in the volume.',
+  'selections': [{'start': "^KATE'S CHOICE\\.$",
+                  'end': '^THE MOSS PEOPLE\\.$',
+                  'natural_end': True,
+                  'sha256': '8480f05b5fba14204062fa60380131085f4fe5a27c449a7ce855d7cd58569a87',
+                  'words': 5718}]},
+ {'id': '27567',
+  'title': "Aunt Jo's scrap-bag, Volume 6 An old-fashioned Thanksgiving, etc.",
+  'url': 'https://www.gutenberg.org/cache/epub/27567/pg27567.txt',
+  'date': '1882',
+  'date_evidence': 'Title page and copyright 1882.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/27567/pg27567.txt'],
+  'note': 'The second is Thanksgiving, not Christmas; both fit the expanded cold-season domestic scope. Most '
+          'other collection contents are unrelated.',
+  'selections': [{'start': '^AN OLD-FASHIONED THANKSGIVING\\.$',
+                  'end': '^HOW IT ALL HAPPENED\\.$',
+                  'natural_end': True,
+                  'sha256': 'a55b444f2e0a80cfc572dd2a3ffdef9c03b6ca0cc6f6e4e9cfac9fdd9212ec72',
+                  'words': 7279},
+                 {'start': '^HOW IT ALL HAPPENED\\.$',
+                  'end': "^THE DOLLS' JOURNEY FROM MINNESOTA TO MAINE\\.$",
+                  'natural_end': True,
+                  'sha256': '390dafbccba5930b78d36827a4fa4b0b6b51048ea01b29ec1ca06d8f5c8d63a7',
+                  'words': 3814}]},
+ {'id': '10360',
+  'title': "Kitty's Class Day and Other Stories",
+  'url': 'https://www.gutenberg.org/cache/epub/10360/pg10360.txt',
+  'date': '1882 collection',
+  'date_evidence': 'Front matter identifies original publication as Proverb Stories, 1882.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/10360/pg10360.txt'],
+  'note': 'Adult visitors, romance and longer dialogue; more demanding than the youngest-reader family '
+          'books.',
+  'selections': [{'start': '^A COUNTRY CHRISTMAS$',
+                  'end': '^ON PICKET DUTY$',
+                  'natural_end': True,
+                  'sha256': '684564720bbcf0fd0a6edd774f31a6c5d986ee65309894fcba46175b4ca18a5a',
+                  'words': 11177}]},
+ {'id': '40682',
+  'title': "Lulu's Library, Volume 1 (of 3)",
+  'url': 'https://www.gutenberg.org/cache/epub/40682/pg40682.txt',
+  'date': '1885 copyright; 1886 edition',
+  'date_evidence': 'Copyright and preface 1885; title page 1886.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/40682/pg40682.txt'],
+  'note': 'Contains a dream/fantasy sequence inside a family Christmas story; keep this distinction when '
+          'reviewing coherence examples.',
+  'selections': [{'start': '^ A CHRISTMAS DREAM, AND HOW IT CAME TRUE\\.$',
+                  'end': '^ THE CANDY COUNTRY\\.$',
+                  'natural_end': True,
+                  'sha256': 'ba5a5a235c0a4015b79ca2aee8b8ae30a4e828497e94559453de82be0192a241',
+                  'words': 5504}]},
+ {'id': '22234',
+  'title': "Aunt Jo's scrap-bag, Volume 5 Jimmy's cruise in the Pinafore, etc.",
+  'url': 'https://www.gutenberg.org/cache/epub/22234/pg22234.txt',
+  'date': '1879 copyright; 1880 edition',
+  'date_evidence': 'Copyright 1879; title page 1880.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/22234/pg22234.txt'],
+  'note': 'Snowy setting and clear action/consequence, but an adult retrospective about poverty, work and '
+          'despair; less directly matched to child domestic dialogue.',
+  'selections': [{'start': '^WHAT A SHOVEL DID\\.$',
+                  'end': '^CLAMS\\.$',
+                  'natural_end': True,
+                  'sha256': '54a99effd6a912723207a097876c363b59be38f6a0bc3f815438524d4f181e8b',
+                  'words': 2526}]}]
 
 def write_json(path, value):
     path = Path(path)
@@ -896,6 +1258,7 @@ def training(args):
     from transformers.trainer_utils import get_last_checkpoint
     fixed_budget = getattr(args, "fixed_budget", False)
     scene_recipe = getattr(args, "scene_recipe", None)
+    winter_recipe = getattr(args, "winter_recipe", None)
     attention_dropout = getattr(args, "attention_dropout", .1)
     if (args.resume or args.continue_from) and args.rebuild:
         raise ValueError("Do not rebuild a dataset while resuming or continuing an existing model")
@@ -977,6 +1340,8 @@ def training(args):
     settings["grow_layers"] = (continuation or {}).get("depth_growth", {}).get("target_layers")
     if scene_recipe is not None:
         settings["scene_recipe"] = scene_recipe
+    if winter_recipe is not None:
+        settings["winter_recipe"] = winter_recipe
     if args.resume:
         prior = json.loads((out / "run_config.json").read_text())
         prior.setdefault("warmup_ratio", .05)  # Compatibility with the original script.
@@ -1009,12 +1374,22 @@ def training(args):
     review_training_data = train_set
     if scene_recipe and scene_recipe["treatment"]:
         train_set = SceneReplayDataset(train_set, args.scene_records, tokenizer.eos_token_id, args.seed)
+    if winter_recipe:
+        supplementary = BookWindows(args.winter_train_path, args.block_size, args.train_limit,
+                                    random_offsets=True, seed=args.seed)
+        # Check copying against BOTH pools, including for baseline/control prose.
+        review_training_data = combined_book_windows(review_training_data, supplementary)
+        if winter_recipe["treatment"]:
+            train_set = WinterReplayDataset(train_set, supplementary, args.seed)
     val_set = BookWindows(data / "validation.jsonl", args.block_size, args.eval_limit)
     effective_batch = args.batch_size * args.accumulation
     origin = "Continued" if continuation is not None else "Random"
     print(f"{origin} GPT-2: {parameters:,} parameters; {len(train_set):,} training examples; "
           f"effective batch {effective_batch} (at most {effective_batch*(args.block_size-1):,} targets/update).", flush=True)
-    print(f"Unique training target tokens/parameter: {report['splits']['train']['target_tokens']/parameters:.2f}. "
+    unique_targets = report['splits']['train']['target_tokens']
+    if winter_recipe and winter_recipe["treatment"]:
+        unique_targets += args.winter_manifest["target_tokens"]
+    print(f"Unique training target tokens/parameter: {unique_targets/parameters:.2f}. "
           "Repeated epochs do not add new language evidence.", flush=True)
     use_cuda = torch.cuda.is_available() and not args.cpu
     bf16 = precision == "bf16"
@@ -1074,7 +1449,7 @@ def training(args):
         continuation["initial_validation_nll"] = baseline["eval_nll"]
         write_json(out / "continuation.json", continuation)
         write_json(out / "initial_samples.json", generate_samples(model, tokenizer, PROMPTS, args.sample_tokens))
-        if scene_recipe is not None:
+        if scene_recipe is not None or winter_recipe is not None:
             run_capacity_review(model, tokenizer, args.capacity_benchmark, review_training_data,
                                 initial, 0, baseline["eval_nll"])
         print(f"Continuation baseline NLL: {baseline['eval_nll']:.6f}. "
@@ -1122,6 +1497,8 @@ def training(args):
                            "precision": precision,
                            "gpu": torch.cuda.get_device_name() if use_cuda else None}}
     write_json(best / "training_summary.json", summary)
+    if winter_recipe:
+        write_json(best / "supplementary_sources.json", args.winter_manifest)
     if not args.skip_test:
         write_json(out / "test_metrics.json", metrics)
     final_samples = generate_samples(model, tokenizer, PROMPTS, args.sample_tokens)
@@ -1301,7 +1678,7 @@ def atomic_json(path, value):
 def training_exposure(dataset, effective_batch, steps, seed):
     """Exact target count, including short book tails and a partial last update."""
     import torch
-    if isinstance(dataset, SceneReplayDataset):
+    if isinstance(dataset, (SceneReplayDataset, WinterReplayDataset)):
         return dataset.exposure(effective_batch, steps, seed)
     lengths = [min(dataset.block_size, len(dataset.books[book])-start)-1
                for book, start in dataset.windows]
@@ -1488,8 +1865,11 @@ def run_capacity_review(model, tokenizer, benchmark, training_data, destination,
     destination.mkdir(parents=True, exist_ok=True)
     results, generated_ids = [], []
     start = time.monotonic()
-    training_score = score_training_subset(model, tokenizer, training_data,
+    training_score = score_training_subset(model, tokenizer, getattr(training_data, "original_pool", training_data),
                                           benchmark.get("training_eval_windows", 1024))
+    supplementary_score = (score_training_subset(model, tokenizer, training_data.supplementary_pool,
+                           min(256, benchmark.get("training_eval_windows", 1024)))
+                           if hasattr(training_data, "supplementary_pool") else None)
     for prompt in benchmark["prompts"]:
         for seed in benchmark["sampling_seeds"]:
             sample, = generate_samples(model, tokenizer, [prompt], benchmark["generation_tokens"], seed,
@@ -1517,9 +1897,11 @@ def run_capacity_review(model, tokenizer, benchmark, training_data, destination,
         result["longest_training_copy_tokens"] = match["matched_tokens"]
     report = {"step": step, "validation_nll": nll, "benchmark_sha256": json_digest(benchmark),
               "test_evaluated": False, "fixed_training_subset": training_score,
+              "fixed_supplementary_subset": supplementary_score,
               "samples": results, "runtime_seconds": time.monotonic()-start,
               "copy_search": "Exact generated-only token spans >=32, searched within training books. "
               "Zero means no match detected by this rule, not proof of originality.",
+              "copy_reference_scope": getattr(training_data, "copy_reference_scope", "Original training books"),
               "review_rubric": {"0": "clear failure", "1": "mixed or uncertain", "2": "sustained success"},
               "acceptance": "Manual review required; loss, low repetition, and copying are not coherence scores."}
     write_coherence_sheet(destination / "review.csv", results)
@@ -1557,8 +1939,12 @@ def capacity_callback(args, tokenizer, training_data):
             atomic_json(destination / "model" / "training_summary.json", {
                 "dataset_sha256": args.capacity_benchmark["dataset_sha256"], "global_step": state.global_step,
                 "validation_nll": nll, "parameters": model.num_parameters(), "test": {},
-                "initialization": "project_checkpoint" if getattr(args, "scene_recipe", None) else "random",
+                "initialization": "project_checkpoint" if (getattr(args, "scene_recipe", None)
+                    or getattr(args, "winter_recipe", None)) else "random",
+                "winter_recipe": getattr(args, "winter_recipe", None),
                 "benchmark_sha256": args.benchmark_sha256})
+            if getattr(args, "winter_recipe", None):
+                atomic_json(destination / "model" / "supplementary_sources.json", args.winter_manifest)
             run_capacity_review(model, tokenizer, args.capacity_benchmark, training_data,
                                 destination, state.global_step, nll)
 
@@ -2201,6 +2587,402 @@ def finetune_scenes(args):
     return results
 
 
+def select_winter_text(body, spec):
+    """Fail closed when an edition changes; never guess a replacement boundary."""
+    matches = list(re.finditer(spec["start"], body, re.M))
+    if len(matches) != 1:
+        raise ValueError(f"Winter start boundary must be unique: {spec['start']}")
+    start = matches[0]
+    end = re.search(spec["end"], body[start.end():], re.M)
+    if end is None:
+        raise ValueError(f"Missing winter end boundary: {spec['end']}")
+    stop = start.end()+end.start()
+    text = body[start.start():stop].strip()
+    text = re.sub(r'(?:\n\s*(?:[IVX]+\.|(?:\*\s*){3,}))+\s*$', '', text).strip()
+    if hashlib.sha256(text.encode()).hexdigest() != spec["sha256"]:
+        raise ValueError("Selected Gutenberg text changed from the reviewed edition. "
+                         "Restore the cached edition or review/update the inline selection; do not bypass this check.")
+    if re.search(r'Project Gutenberg|Transcriber[’\']s [Nn]otes', text):
+        raise ValueError("Boilerplate survived winter selection")
+    return text, start.start(), stop
+
+
+def word_shingles(words, width=32):
+    for start in range(len(words)-width+1):
+        key = hashlib.blake2b(" ".join(words[start:start+width]).encode(), digest_size=8).digest()
+        yield start, key
+
+
+def screen_winter_units(units, original):
+    """Exclude shared held-out passages and substantial training reprints.
+
+    `original` contains decoded SAVED token sequences, not mutable clean files.
+    Every hash hit is verified for the 32-word held-out check. Shorter paraphrases
+    and related-series similarities are not claimed to be detected.
+    """
+    heldout, index, training = [], defaultdict(list), []
+    for row in original:
+        if row["split"] == "train":
+            training.append((row["id"], fingerprints(row["text"])))
+        else:
+            words = re.findall(r'\w+', row["text"].casefold())
+            number = len(heldout)
+            heldout.append((row, words))
+            for start, key in word_shingles(words):
+                index[key].append((number, start))
+    accepted, excluded = [], []
+    for row in units:
+        words = re.findall(r'\w+', row["text"].casefold())
+        conflict = None
+        for start, key in word_shingles(words):
+            for number, other_start in index.get(key, ()):
+                other, other_words = heldout[number]
+                if words[start:start+32] == other_words[other_start:other_start+32]:
+                    conflict = {"reason": "heldout_exact_32_word_overlap", "other_id": other["id"],
+                                "split": other["split"], "start_word": start, "other_start_word": other_start}
+                    break
+            if conflict:
+                break
+        sig = fingerprints(row["text"])
+        if not conflict:
+            for other_id, other_sig in training:
+                shared = len(sig & other_sig)
+                containment = shared/max(1, min(len(sig), len(other_sig)))
+                if shared >= 12 and containment >= .05:
+                    conflict = {"reason": "substantial_training_or_candidate_reprint", "other_id": other_id,
+                                "shared_sampled_13_word_shingles": shared, "containment": containment}
+                    break
+        if conflict:
+            excluded.append({"id": row["id"], **conflict})
+        else:
+            accepted.append(row)
+            training.append((row["id"], sig))
+    return accepted, excluded
+
+
+def prepare_winter_material(data, cache, tokenizer, signature, offline=False):
+    """Download all 24 approved sources, select exact prose, and freeze training IDs."""
+    units, records = [], []
+    for source in WINTER_SOURCES:
+        raw = download_book(source["url"], cache, offline)
+        metadata, body = clean_book(raw)
+        records.append({**source, **metadata, "raw_sha256": hashlib.sha256(raw.encode()).hexdigest()})
+        for number, spec in enumerate(source["selections"], 1):
+            text, start, end = select_winter_text(body, spec)
+            units.append({"id": f"winter-{source['id']}-{number}", "source_id": source["id"],
+                          "text": text, "sha256": spec["sha256"], "natural_end": spec["natural_end"],
+                          "words": len(text.split()), "clean_start_character": start,
+                          "clean_end_character_exclusive": end})
+        print(f"[winter source {len(records)}/{len(WINTER_SOURCES)}] {metadata['title']}", flush=True)
+    original = []
+    for split in ("train", "validation", "test"):
+        for line in (Path(data)/f"{split}.jsonl").read_text().splitlines():
+            row = json.loads(line)
+            original.append({"id": str(row["id"]), "split": split,
+                             "text": tokenizer.decode(row["ids"], skip_special_tokens=True)})
+    accepted, excluded = screen_winter_units(units, original)
+    if not accepted:
+        raise ValueError("No additional material passed the overlap checks")
+    lines, selection = [], []
+    for row in accepted:
+        ids = [tokenizer.eos_token_id]+tokenizer.encode(row["text"], add_special_tokens=False)
+        if row["natural_end"]:
+            ids.append(tokenizer.eos_token_id)
+        lines.append(json.dumps({"id": row["id"], "ids": ids}))
+        selection.append({k: v for k, v in row.items() if k != "text"} | {"target_tokens": len(ids)-1})
+    encoded = "\n".join(lines)+"\n"
+    manifest = {"version": 1, "catalog_sha256": json_digest(WINTER_SOURCES),
+                "base_dataset_sha256": signature, "train_sha256": hashlib.sha256(encoded.encode()).hexdigest(),
+                "sources": records, "accepted": selection, "excluded": excluded,
+                "words": sum(r["words"] for r in selection),
+                "target_tokens": sum(r["target_tokens"] for r in selection),
+                "test_evaluated": False,
+                "screen": "Held-out texts read only for exact 32-normalized-word overlap exclusion; "
+                          "no model evaluation. Train/new reprints screened with sampled 13-word fingerprints, "
+                          ">=12 shared and >=5% smaller-document containment. Not a semantic deduplication guarantee."}
+    return manifest, encoded
+
+
+def combined_book_windows(first, second):
+    """Unweighted union for copy detection and fixed-subset diagnostics."""
+    import copy
+    result = copy.copy(first)
+    result.books = first.books+second.books
+    result.book_ids = first.book_ids+second.book_ids
+    result.windows = first.windows+[(b+len(first.books), start) for b, start in second.windows]
+    result.random_offsets = False
+    result.original_pool, result.supplementary_pool = first, second
+    result.copy_reference_scope = ("Original training plus additional winter selections for ALL comparisons, "
+                                   "including the unchanged baseline and optional control. A match to an addition "
+                                   "does not mean the baseline/control trained on it.")
+    result.set_training_epoch(0)
+    return result
+
+
+class WinterReplayDataset:
+    """Half new / half original windows, with all original windows once per epoch.
+
+    New windows cycle without replacement; each cycle gets fresh book offsets.
+    All causal targets are scored (no prefix masking). Tail lengths cause small
+    differences from a 50% target share, reported exactly by exposure().
+    """
+    def __init__(self, replay, supplementary, seed=42):
+        if replay.block_size != supplementary.block_size:
+            raise ValueError("Winter and replay windows must have the same context length")
+        self.replay, self.supplementary, self.seed = replay, supplementary, seed
+        self.block_size, self.random_offsets = replay.block_size, True
+        self.set_training_epoch(0)
+
+    def __len__(self):
+        return 2*len(self.replay)
+
+    def set_training_epoch(self, epoch):
+        import copy
+        self.epoch = int(epoch)
+        self.replay.set_training_epoch(self.epoch)
+        self.cycles, self.order = [], []
+        cycles = math.ceil(len(self.replay)/len(self.supplementary))
+        for cycle in range(cycles):
+            dataset = copy.copy(self.supplementary)
+            dataset.random_offsets = True
+            dataset.set_training_epoch(self.epoch*cycles+cycle)
+            self.cycles.append(dataset)
+            order = list(range(len(dataset)))
+            random.Random(f"winter:{self.seed}:{self.epoch}:{cycle}").shuffle(order)
+            self.order.extend((cycle, i) for i in order)
+        self.order = self.order[:len(self.replay)]
+
+    def __getitem__(self, index):
+        slot, replay = divmod(index, 2)
+        if replay:
+            return self.replay[slot]
+        cycle, row = self.order[slot]
+        return self.cycles[cycle][row]
+
+    def exposure(self, effective_batch, steps, seed):
+        import torch
+        previous = self.epoch
+        per_epoch = math.ceil(len(self)/effective_batch)
+        result = {"steps": steps, "updates_per_epoch": per_epoch, "complete_epochs": steps//per_epoch,
+                  "examples": 0, "scored_targets": 0, "new_examples": 0, "new_targets": 0,
+                  "replay_examples": 0, "replay_targets": 0}
+        remaining = steps
+        try:
+            for epoch in range(math.ceil(steps/per_epoch)):
+                self.set_training_epoch(epoch)
+                order = torch.randperm(len(self), generator=torch.Generator().manual_seed(seed+epoch)).tolist()
+                for index in order[:min(remaining, per_epoch)*effective_batch]:
+                    targets = len(self[index]["input_ids"])-1
+                    kind = "replay" if index % 2 else "new"
+                    result[kind+"_examples"] += 1
+                    result[kind+"_targets"] += targets
+                    result["examples"] += 1
+                    result["scored_targets"] += targets
+                remaining -= min(remaining, per_epoch)
+        finally:
+            self.set_training_epoch(previous)
+        unique_targets = sum(len(book)-1 for book in self.supplementary.books)
+        result["new_fraction_of_scored_targets"] = result["new_targets"]/max(1, result["scored_targets"])
+        result["new_corpus_target_pass_equivalents"] = result["new_targets"]/unique_targets
+        return result
+
+
+def finetune_winter(args):
+    """Continue project weights with an explicit, independently frozen expansion."""
+    import gc
+    import os
+    import torch
+    from transformers import AutoTokenizer, GPT2Config, GPT2LMHeadModel, set_seed
+
+    if args.corpus or args.rebuild or args.grow_layers or args.continuation_dropout is not None:
+        raise ValueError("finetune-winter fixes its source catalog, tokenizer, architecture and inherited dropout")
+    if args.resume not in {None, "latest"}:
+        raise ValueError("Use --resume without a checkpoint path for the winter experiment")
+    if int(os.environ.get("WORLD_SIZE", "1")) != 1 or (
+            torch.cuda.is_available() and not args.cpu and torch.cuda.device_count() != 1):
+        raise ValueError("Expose one training device/process for reproducible winter replay")
+    data, out = Path(args.data_dir), Path(args.output_dir)
+    if not (data/"report.json").is_file():
+        raise ValueError("Restore the source model's prepared data/ directory. This continuation never rebuilds it.")
+    if out.exists() and any(out.iterdir()) and not args.resume:
+        raise ValueError("Use a new winter output directory or --resume, including after --plan-only")
+    if args.resume and not (out/"experiment.json").is_file():
+        raise ValueError("No frozen winter experiment to resume")
+    if args.max_steps <= 0 or args.max_steps < args.eval_steps:
+        raise ValueError("Winter budget must be positive and at least --eval-steps")
+    if args.train_limit or args.eval_limit:
+        raise ValueError("Use --smoke-test for execution checks; full runs keep all prepared data")
+    prepare(args)
+    signature = dataset_signature(data)
+    tokenizer = AutoTokenizer.from_pretrained(data/"tokenizer", local_files_only=True)
+    source = Path(args.continue_from or ROOT/"runs/christmas-scenes/control/best").resolve()
+    snapshot, material = out/"starting_model", out/"material"
+    if out.resolve() == source or out.resolve() in source.parents:
+        raise ValueError("Winter output must not contain or replace its source checkpoint")
+    if args.resume:
+        prior = json.loads((out/"experiment.json").read_text())
+        model = load_continuation(snapshot, tokenizer, signature)
+        source_description = prior["source"]
+        manifest = json.loads((material/"supplementary_sources.json").read_text())
+        encoded = (material/"train.jsonl").read_text()
+        if (manifest["base_dataset_sha256"] != signature
+                or manifest["catalog_sha256"] != json_digest(WINTER_SOURCES)
+                or manifest["train_sha256"] != hashlib.sha256(encoded.encode()).hexdigest()):
+            raise ValueError("Frozen winter material, catalog or base data changed")
+    else:
+        if args.smoke_test:
+            set_seed(args.model_seed)
+            model = GPT2LMHeadModel(GPT2Config(
+                vocab_size=len(tokenizer), n_positions=512, n_ctx=512, n_layer=1, n_embd=32,
+                n_head=2, n_inner=128, bos_token_id=tokenizer.bos_token_id,
+                eos_token_id=tokenizer.eos_token_id, pad_token_id=tokenizer.pad_token_id,
+                resid_pdrop=.05, embd_pdrop=.05, attn_pdrop=.05))
+            source_description = {"kind": "random_tiny_execution_check", "seed": args.model_seed}
+        else:
+            if not source.is_dir():
+                raise ValueError(f"Source weights not found: {source}. Set --continue-from to an existing "
+                                 "project best/ directory, preferably christmas-scenes/control/best. "
+                                 "Reports ZIPs do not contain weights.")
+            model = load_continuation(source, tokenizer, signature)
+            source_description = {"kind": "existing_project_model", "path": str(source),
+                                  "parameters": model.num_parameters()}
+            provenance = next((source/name for name in ("training_summary.json", "provenance.json")
+                               if (source/name).exists()), None)
+            if provenance:
+                source_description["parent_provenance"] = json.loads(provenance.read_text())
+        if model.config.n_positions != 512:
+            raise ValueError("The reviewed winter experiment requires a context-512 project checkpoint")
+        manifest, encoded = prepare_winter_material(
+            data, Path(args.winter_cache or data.parent/"winter-data"), tokenizer, signature, args.offline)
+    args.block_size = model.config.n_positions
+    digest = hashlib.sha256()
+    for name, tensor in sorted(model.state_dict().items()):
+        digest.update(f"{name}:{tensor.dtype}:{list(tensor.shape)}".encode())
+        digest.update(tensor.detach().cpu().contiguous().reshape(-1).view(torch.uint8).numpy().tobytes())
+    if args.smoke_test:
+        args.cpu, args.precision = True, "fp32"
+        args.batch_size, args.accumulation, args.max_steps = 2, 1, 3
+        args.train_limit, args.eval_limit = 16, 8
+        args.eval_steps, args.sample_steps, args.benchmark_steps = 2, 2, 2
+        args.sample_tokens, args.benchmark_tokens, args.benchmark_prompts = 12, 12, 2
+    args.precision = resolve_precision(args.precision, args.cpu)
+    benchmark = make_capacity_benchmark(data, tokenizer, signature, args.benchmark_prompts,
+                                       args.seed, generation_tokens=args.benchmark_tokens)
+    benchmark["short_tokens"] = min(96, args.benchmark_tokens)
+    if args.smoke_test:
+        benchmark["training_eval_windows"] = 16
+    recipe = {"version": 1, "manifest_sha256": json_digest(manifest),
+              "train_sha256": manifest["train_sha256"], "new_example_fraction": .5,
+              "prefix_loss": "all_causal_targets", "false_end_targets": False}
+    settings = {k: getattr(args, k) for k in (
+        "seed", "model_seed", "batch_size", "accumulation", "learning_rate", "warmup_ratio", "max_steps",
+        "eval_steps", "sample_steps", "sample_tokens", "benchmark_steps", "precision", "smoke_test",
+        "train_limit", "eval_limit", "with_control")}
+    plan = {"version": 1, "source": source_description, "starting_weights_sha256": digest.hexdigest(),
+            "dataset_sha256": signature, "recipe": recipe, "settings": settings,
+            "benchmark_sha256": json_digest(benchmark), "test_evaluated": False,
+            "rationale": {
+                "material": "All 24 shortlisted sources processed. Exact complete stories or contiguous "
+                "winter/domestic chapter ranges; no rewriting, keyword-filtered fragments or external weights.",
+                "replay": "50% additional / 50% original examples; nearly equal target share with full causal "
+                "supervision. Every original window once per mixture epoch. New windows cycle without replacement "
+                "with fresh offsets per cycle. Exact target counts and new-corpus pass equivalents are reported.",
+                "endings": "No windows cross selected ranges. EOS only at genuine story/book ends; chapter cuts "
+                "are not declared complete stories. Original spellings, dialogue and verse are retained.",
+                "optimization": "Inherited GPT-2 architecture/dropout/tokenizer. Fresh AdamW, default peak 5e-5, "
+                "betas .9/.95, decay .1, clip 1; 3% warmup, cosine to 5e-6. Default batch 8x4, 1000 updates. "
+                "Conservative pilot settings, not tuned optima; new material remains small.",
+                "evaluation": "Original validation and benchmark fixed; test read only for overlap screening. "
+                "Baseline eligible for best NLL; all review weights retained. All new selections are training "
+                "material, not a new validation split. No automatic coherence verdict.",
+                "control": "Optional same-initialization, same-update ordinary continuation. Target counts and "
+                "compute are not exactly matched; compare prose as well as losses."}}
+    if args.resume:
+        if prior != plan or json.loads((out/"benchmark.json").read_text()) != benchmark:
+            raise ValueError("Frozen winter settings, source weights, material or benchmark changed")
+    else:
+        material.mkdir(parents=True, exist_ok=True)
+        (material/"train.jsonl").write_text(encoded)
+        atomic_json(material/"supplementary_sources.json", manifest)
+        model.save_pretrained(snapshot, safe_serialization=True)
+        tokenizer.save_pretrained(snapshot)
+        atomic_json(snapshot/"provenance.json", {"dataset_sha256": signature, "source": source_description})
+        atomic_json(out/"benchmark.json", benchmark)
+        atomic_json(out/"experiment.json", plan)
+    replay = BookWindows(data/"train.jsonl", 512, args.train_limit, random_offsets=True, seed=args.seed)
+    new = BookWindows(material/"train.jsonl", 512, args.train_limit, random_offsets=True, seed=args.seed)
+    exposure = training_exposure(WinterReplayDataset(replay, new, args.seed),
+                                args.batch_size*args.accumulation, args.max_steps, args.seed)
+    atomic_json(out/"planned_exposure.json", exposure)
+    print("\nWINTER CONTINUATION:", json.dumps({"sources_processed": len(manifest["sources"]),
+          "accepted_ranges": len(manifest["accepted"]), "excluded": manifest["excluded"],
+          "additional_words": manifest["words"], "additional_targets": manifest["target_tokens"],
+          "planned_exposure": exposure, "settings": settings}, indent=2), flush=True)
+    del model, replay, new
+    gc.collect()
+    if args.plan_only:
+        print("Plan and source snapshot saved. Add --resume to train the unchanged plan.", flush=True)
+        return plan
+    results = {}
+    branches = ("control", "expanded") if args.with_control else ("expanded",)
+    for name in branches:
+        branch = argparse.Namespace(**vars(args))
+        branch.output_dir, branch.command = str(out/name), "train"
+        branch.continue_from = str(snapshot.resolve())
+        branch.fixed_budget, branch.skip_test, branch.random_window_offsets = True, True, True
+        branch.capacity_benchmark, branch.benchmark_sha256 = benchmark, json_digest(benchmark)
+        branch.winter_recipe = {**recipe, "treatment": name == "expanded"}
+        branch.winter_train_path, branch.winter_manifest = str(material/"train.jsonl"), manifest
+        branch.resume = "latest" if args.resume and (out/name/"run_config.json").exists() else None
+        if branch.resume and latest_complete_checkpoint(out/name, require_scaler=args.precision == "fp16"):
+            branch.continue_from = None
+        complete = out/name/"best/training_summary.json"
+        if branch.resume and complete.exists() and (out/name/"best/coherence.json").exists():
+            summary = json.loads(complete.read_text())
+            if (summary["global_step"] != args.max_steps or summary["dataset_sha256"] != signature
+                    or summary["run"].get("winter_recipe") != branch.winter_recipe):
+                raise ValueError(f"Completed winter branch differs from its frozen plan: {name}")
+        else:
+            summary = training(branch)
+        results[name] = {k: summary[k] for k in (
+            "parameters", "global_step", "best_validation_nll", "best_validation_step", "training_exposure",
+            "optimizer_skipped_steps", "applied_optimizer_updates")}
+        results[name].update(best_model=str(out/name/"best"), **{k: summary["continuation"][k] for k in (
+            "retained_initial_model", "initial_validation_nll")})
+        atomic_json(out/"comparison.json", {"complete": len(results) == len(branches), "branches": results,
+                    "benchmark_sha256": json_digest(benchmark), "test_evaluated": False,
+                    "matched_compute": False, "matched_target_counts": False, "coherence_winner": None,
+                    "interpretation": "Compare prose against the unchanged baseline; NLL is not coherence."})
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+    key = {}
+    for selection in ("best", "final"):
+        destinations = [("baseline", out/branches[0]/"initial", snapshot)]
+        for name in branches:
+            folder = out/name/("best" if selection == "best" else f"reviews/step-{args.max_steps}")
+            destinations.append((name, folder, folder if selection == "best" else folder/"model"))
+        for panel, field in (("full", "samples"), ("short", "short_samples")):
+            rows = []
+            for name, folder, checkpoint in destinations:
+                for sample in json.loads((folder/"coherence.json").read_text())[field]:
+                    opaque = hashlib.sha256(
+                        f"{plan['benchmark_sha256']}:{name}:{selection}:{panel}:{sample['sample_id']}".encode()).hexdigest()[:16]
+                    key[opaque] = {"branch": name, "selection": selection, "panel": panel,
+                                   "sample_id": sample["sample_id"], "checkpoint": str(checkpoint)}
+                    rows.append({**sample, "sample_id": opaque})
+            random.Random(args.seed).shuffle(rows)
+            path = out/f"blind_{selection}_{panel}.csv"
+            if not path.exists():
+                write_coherence_sheet(path, rows)
+    atomic_json(out/"review_key.json", key)
+    print(f"Winter continuation finished: {out/'comparison.json'}. Review blind_best_full.csv and "
+          "blind_final_full.csv; every periodic review retains exportable weights. Test not evaluated.", flush=True)
+    return results
+
+
 def model_card(summary):
     return f"""---
 language: en
@@ -2215,6 +2997,7 @@ tags:
 
 A {summary['parameters']:,}-parameter GPT-2 language model trained on the Gutenberg works listed in
 [christmasmodel](https://github.com/wildfellhall/christmasmodel/blob/main/corpus.py).
+{('This run used the selected pre-1920 winter/domestic sources documented in supplementary_sources.json. The original validation/test splits and tokenizer remain fixed. If retained_initial_model is true below, this selected export retains the starting weights.' if (summary['run'].get('winter_recipe') or {}).get('treatment') else '')}
 Its byte-level BPE vocabulary was learned on training books only.
 The base model starts from random weights. Continuations reuse only this project's
 own weights; optional depth expansion inserts initially identity residual blocks.
@@ -2227,7 +3010,7 @@ repetition, dated language, and historical biases. Repeated epochs are not new d
 Best validation NLL: {summary['best_validation_nll']}
 Continuation details: {json.dumps(summary.get('continuation'))}
 Training windows: {'shifted within books each epoch' if summary['run'].get('random_window_offsets') else 'fixed'}
-Run intervention: {'Original-text scene continuations with masked prefixes and corpus replay.' if (summary['run'].get('scene_recipe') or {}).get('treatment') else 'Ordinary causal language modeling.'}
+Run intervention: {'Winter-fiction additions with 50% original replay examples and full causal supervision.' if (summary['run'].get('winter_recipe') or {}).get('treatment') else ('Original-text scene continuations with masked prefixes and corpus replay.' if (summary['run'].get('scene_recipe') or {}).get('treatment') else 'Ordinary causal language modeling.')}
 Test token perplexity: {summary['test'].get('test_perplexity', 'not evaluated in this development run')}
 Smoke test: {summary['smoke_test']}; limited data: {summary['limited_data']}.
 Scores use this model's tokenizer and are not directly comparable to other vocabularies.
@@ -2448,7 +3231,7 @@ def inference(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["prepare", "train", "finetune-scenes", "compare-capacity", "compare-dropout", "compare-windowing", "compare-depth", "diagnose",
+    parser.add_argument("command", choices=["prepare", "train", "finetune-winter", "finetune-scenes", "compare-capacity", "compare-dropout", "compare-windowing", "compare-depth", "diagnose",
                                             "compare-decoding", "evaluate", "generate"])
     parser.add_argument("--corpus", help="Optional subset of the embedded Christmas URLs, as a Python sources list")
     parser.add_argument("--data-dir", default=str(ROOT / "data"))
@@ -2474,7 +3257,7 @@ def main(argv=None):
     parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument("--warmup-ratio", type=float, default=None)
     parser.add_argument("--epochs", type=float, default=None, help="Capacity comparison: 40; ordinary train: 12")
-    parser.add_argument("--max-steps", type=int, default=None, help="Optional optimizer-step cap; scene pilot: 1000")
+    parser.add_argument("--max-steps", type=int, default=None, help="Optional optimizer-step cap; scene/winter pilots: 1000")
     parser.add_argument("--eval-steps", type=int, default=250)
     parser.add_argument("--sample-steps", type=int, default=None)
     parser.add_argument("--sample-tokens", type=int, default=96)
@@ -2499,11 +3282,14 @@ def main(argv=None):
     parser.add_argument("--benchmark-tokens", type=int, default=192,
                         help="Capacity comparison: maximum generated tokens per prefix/seed")
     parser.add_argument("--plan-only", action="store_true",
-                        help="Capacity/scene comparison: freeze data/benchmark/settings without training")
+                        help="Capacity/scene/winter experiment: freeze data/benchmark/settings without training")
     parser.add_argument("--scene-min-tokens", type=int, default=192)
     parser.add_argument("--scene-max-tokens", type=int, default=448)
     parser.add_argument("--scenes-per-book", type=int, default=16)
     parser.add_argument("--scene-review", help="Optional edited scene_candidates.csv; only include/natural_end may change")
+    parser.add_argument("--winter-cache", help="Winter source download cache; defaults to winter-data beside --data-dir")
+    parser.add_argument("--with-control", action="store_true",
+                        help="finetune-winter: also run a same-start, same-update original-corpus control")
     parser.add_argument("--eval-limit", type=int, help="Diagnostic window cap; omitted for full evaluation")
     parser.add_argument("--diagnostic-windows", type=int, default=1024,
                         help="Maximum windows per train/validation split for diagnose")
@@ -2514,13 +3300,14 @@ def main(argv=None):
     args = parser.parse_args(argv)
     capacity = args.command == "compare-capacity"
     scenes = args.command == "finetune-scenes"
+    winter = args.command == "finetune-winter"
     defaults = {"min_success_rate": (1., .9), "dropout": (.05, .15),
                 "attention_dropout": (.05, .1), "warmup_ratio": (.02, .05),
                 "epochs": (40., 12.), "sample_steps": (500, 250),
                 "random_window_offsets": (True, False),
                 "output_dir": (str(ROOT / "runs" / "christmas-capacity"), str(ROOT / "runs" / "christmas"))}
-    if scenes:
-        for name, value in {"output_dir": str(ROOT/"runs/christmas-scenes"), "learning_rate": 5e-5,
+    if scenes or winter:
+        for name, value in {"output_dir": str(ROOT/("runs/christmas-winter" if winter else "runs/christmas-scenes")), "learning_rate": 5e-5,
                             "warmup_ratio": .03, "max_steps": 1000, "benchmark_steps": 250,
                             "min_success_rate": 1., "random_window_offsets": True}.items():
             if getattr(args, name) is None:
@@ -2535,15 +3322,17 @@ def main(argv=None):
         args.model_seed = args.seed
     if not all(0 <= seed < 2**32 for seed in (args.seed, args.model_seed)):
         parser.error("Data and model seeds must be integers in [0, 2**32)")
-    if args.plan_only and not (capacity or scenes):
-        parser.error("--plan-only is for compare-capacity or finetune-scenes")
+    if args.plan_only and not (capacity or scenes or winter):
+        parser.error("--plan-only is for compare-capacity, finetune-scenes or finetune-winter")
+    if (args.winter_cache or args.with_control) and not winter:
+        parser.error("--winter-cache and --with-control are for finetune-winter")
     if args.scene_review and not scenes:
         parser.error("--scene-review is for finetune-scenes")
     if scenes and (not 128 <= args.scene_min_tokens <= args.scene_max_tokens <= 510 or args.scenes_per_book <= 0):
         parser.error("Scenes need 128 <= minimum <= maximum <= 510 tokens, and a positive per-book cap")
     if capacity and (args.layers, args.width, args.heads) != (6, 384, 6):
         parser.error("compare-capacity fixes both architectures; do not override --layers/--width/--heads")
-    if (capacity or scenes) and (min(args.benchmark_steps, args.benchmark_prompts, args.benchmark_tokens) <= 0
+    if (capacity or scenes or winter) and (min(args.benchmark_steps, args.benchmark_prompts, args.benchmark_tokens) <= 0
                      or args.benchmark_tokens+160 > args.block_size):
         parser.error("Capacity benchmark counts must be positive and generation tokens + 160 must fit the context")
     if args.heads <= 0 or args.width % args.heads or args.block_size < 8 or args.vocab_size < 258:
@@ -2576,6 +3365,8 @@ def main(argv=None):
         training(args)
     elif args.command == "finetune-scenes":
         finetune_scenes(args)
+    elif args.command == "finetune-winter":
+        finetune_winter(args)
     elif args.command == "compare-capacity":
         compare_capacity(args)
     elif args.command == "compare-dropout":

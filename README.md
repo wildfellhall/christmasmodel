@@ -1,14 +1,104 @@
 # Christmasmodel
 
-Train literary continuation models **from random weights** on the original Christmas and winter books. The pasted-cell default in [model.py](model.py) now runs **option 1: scene-focused fine-tuning of the existing 14M model**, with a continuation control and frozen prose review. Fresh training and the earlier capacity comparison remain available. [export.py](export.py) saves a Hugging Face package and converts weights to GGUF.
+Train literary continuation models from random weights on Gutenberg fiction. The pasted-cell default in [model.py](model.py) now continues an existing project model with the approved **pre-1920 winter/domestic expansion**, retaining the original Christmas corpus as replay. [export.py](export.py) packages Hugging Face weights and converts to GGUF.
 
-**The original Christmas source list is a hard constraint.** Training uses only these books. No supplementary corpus, externally generated training stories, or pretrained weights are used. Source-list overrides are limited to subsets of the original URLs.
+The original commands retain the original Christmas-only restriction. The user's expanded scope is implemented explicitly by `finetune-winter`; it does not change old data, splits or tokenizer, or load outside pretrained weights.
+
+## Winter-fiction continuation (current default)
+
+**Paste the entire `model.py` into one Colab GPU cell.** The original 189 URLs, all 24 additional Gutenberg sources, exact selection boundaries, bibliographic evidence, dependencies, training and review code are inline. No clone or helper module is required. Restore the existing model weights and its original prepared `data/` directory first; reports ZIPs alone are insufficient.
+
+The default source is `runs/christmas-scenes/control/best`, the 14M control whose reported validation NLL was 3.721201. The script loads the actual checkpoint supplied; it does not hard-code that score or silently substitute another model. A different project checkpoint, including the 42M model, can be supplied explicitly. Its tokenizer, context length of 512, architecture and dropout are checked/inherited.
+
+```python
+NOTEBOOK_ARGS = [
+    "finetune-winter",
+    "--continue-from", "/content/runs/christmas-scenes/control/best",
+    "--data-dir", "/content/data",
+    "--output-dir", "/content/runs/christmas-winter",
+]
+```
+
+Use mounted Drive paths for persistence. Downloads are cached in `winter-data/` beside the original data directory; `--winter-cache` can set another location. The original prepared data and tokenizer are not modified. Equivalent CLI: `python model.py finetune-winter --continue-from PATH --data-dir DATA --output-dir RUN`.
+
+### Material used
+
+The audited recipe accepts **32 contiguous selections from all 24 sources: 511,061 words and 738,327 additional next-token targets** with the existing tokenizer. These are additions to the original 168 training books. Broad all-season collections are not appended wholesale.
+
+| Sources | Selected material |
+| --- | --- |
+| The Curlytops Snowed In; Six Little Bunkers at Grandpa Ford's; The Bobbsey Twins at Snow Lodge | Complete narratives |
+| Bunny Brown and His Sister Sue Giving a Show; The Bobbsey Twins at Home; Dotty Dimple at School | Complete narratives, including their autumn/winter setup and resolutions |
+| Jack and Jill | Chapters I–XII: December through February |
+| Understood Betsy | Chapters I–VII and XI: winter arrival, home/school life, and final autumn household scene |
+| Little Women | Chapters 1–9 and 15–23: winter family life, late-autumn illness and Christmas reunion |
+| The Dutch Twins | Chapter VI: skating and St. Nicholas |
+| Our Little Swedish Cousin | Chapters I–III: skating, knitting and Yule-tide |
+| Our Little Canadian Cousin | Chapters VI–IX: autumn through winter |
+| Mari, Our Little Norwegian Cousin | Chapters VII–VIII and X: winter family conversations, lumber-camp visit and holiday frolics |
+| Our Little Finnish Cousin | Chapters I–III and V–VII: farm home, school, December and Christmas |
+| Heidi, Elisabeth P. Stork translation | Chapters IV and XVIII–XIX: grandmother's hut and winter village life |
+| What Katy Did at School | Chapters XI–XII: Christmas boxes and waiting for spring |
+| Five Little Peppers Midway | Chapters I–X: baking, the play and midwinter homecoming |
+| The Bobbsey Twins in a Great City | Chapters I–V and XXI–XXII: winter opening and family reunion |
+| Alcott, Aunt Jo's Scrap-Bag I | Tessa's Surprises; Tilly's Christmas |
+| Alcott, Aunt Jo's Scrap-Bag III | Kate's Choice |
+| Alcott, Aunt Jo's Scrap-Bag V | What a Shovel Did |
+| Alcott, Aunt Jo's Scrap-Bag VI | How It All Happened; An Old-Fashioned Thanksgiving |
+| Alcott, Kitty's Class Day and Other Stories | A Country Christmas |
+| Alcott, Lulu's Library I | A Christmas Dream, and How It Came True |
+
+Dates and edition caveats are recorded per source in `WINTER_SOURCES`. The Finnish book and Curlytops transcription use later printings of pre-1920 works; publisher catalogs are excluded. Selected prose retains original wording, spellings, dialogue and embedded verse/folklore. Chapter selection is editorial, not a claim that every paragraph is a simple self-contained scene.
+
+All 24 downloads must succeed. Each selection must match its reviewed content hash and unambiguous start/end headings; changed editions stop preparation instead of silently substituting text. The supplementary manifest records raw/selected hashes and boundaries. Complete selections sharing an exact normalized **32-word passage** with any original validation/test book are excluded. Substantial reprints against original training books and earlier accepted selections are also screened. The current cached editions yielded no exclusions. Shorter overlaps and paraphrases can remain. Test text is read for contamination screening only; the test model score is never computed by this command.
+
+### Training decisions
+
+| Setting | Default and reason |
+| --- | --- |
+| Initialization | Continue the user's existing model, with a fresh optimizer; no outside pretrained weights or tokenizer |
+| Mixture | 50% additional / 50% original **windows** per mixture epoch, approximately 50% of scored targets. Every original replay window appears once; new windows cycle without replacement, with new deterministic offsets each cycle. Longer selections contribute proportionally more windows. |
+| Supervision | Score all causal tokens. No prefix masking; the earlier scene pilot devoted only about 23% of targets to scenes. Windows never cross selection boundaries. EOS is supervised only at genuine story/book endings, not artificial chapter cuts. |
+| Budget | 1,000 updates; batch 8 × accumulation 4. Approximately 8 million new targets, or 11 passes over the additional pool, plus a similar amount of original replay. Exact counts are printed and saved. This is a bounded pilot, not evidence that more epochs will produce coherence. |
+| Optimizer | AdamW, peak LR 5e-5, betas (0.9, 0.95), epsilon 1e-8, weight decay 0.1, gradient clip 1.0. Inherit dropout. Conservative continuation settings, not measured optima. |
+| Schedule/precision | 3% warmup, cosine decay to 5e-6. BF16 on supported CUDA GPUs, otherwise scaled CUDA FP16; CPU/MPS FP32. Skipped optimizer updates are counted. |
+| Validation | Original full validation split, every 250 updates and at the final step. The unchanged source remains eligible for lowest-NLL selection. All new selections belong to training; there is no new held-out supplementary split. |
+| Prose review | Save exportable review weights every 250 updates. Same frozen 20 validation prefixes × seeds 42/43, up to 192 tokens; also show their first 96 tokens. Console samples include greedy and sampled text every 250 updates. |
+| Diagnostics | Separate dropout-off original-training and supplementary-subset losses. Copy checks cover original training plus supplementary text for every comparator, including the baseline; a new-source match does not imply the baseline trained on that source. |
+| Optional control | Add `--with-control` to run ordinary original-corpus continuation from identical starting weights first. Same update budget/settings; compute and target counts are not exactly matched. Default runs the expanded branch and compares it to the unchanged baseline. |
+
+The larger corpus is still small: approximately **11% more distinct training targets** than the original pool. The script cannot promise coherent outputs. Selection by NLL and selection by prose quality remain separate.
+
+### Inspect, resume and export
+
+Add `--plan-only` to prepare and freeze everything without training. Add `--resume` to execute that plan or recover after a disconnect; **remove `--continue-from` and its path** when resuming. Keep the other settings, including `--with-control` if used. The saved initial weights and material remove the need to redownload or keep the external source-model directory. The original prepared data remain required. Edited material/settings are rejected on resume.
+
+Outputs include:
+
+- `material/supplementary_sources.json` and `material/train.jsonl`: exact additions, inclusion/exclusion results and frozen token IDs.
+- `experiment.json`, `benchmark.json`, `planned_exposure.json`: source provenance, rationale, frozen prompts and budget.
+- `expanded/initial/`: unchanged baseline prose and losses.
+- `expanded/best/`: model/tokenizer selected by original validation NLL, possibly the unchanged starting weights.
+- `expanded/reviews/step-N/model/`: retained weights at each review, independently selectable for prose quality.
+- `comparison.json`, `blind_best_full.csv`, `blind_final_full.csv`, corresponding short panels, and `review_key.json`: losses and blind baseline/treatment comparisons. Human ratings are preserved on completed resume. No automatic coherence winner is declared.
+
+The existing `export.py` accepts the best or any review model and now carries `supplementary_sources.json` into the HF package:
+
+```python
+%run export.py --model-dir /content/runs/christmas-winter/expanded/best --output-dir /content/exports/winter --setup --outtype f16 --verify --download
+```
+
+Add `--repo-id YOUR_ACCOUNT/YOUR_MODEL` only when you want to upload to Hugging Face. Training does not upload. Test evaluation remains a separate explicit command after model selection.
+
+For an execution check, use `--smoke-test --output-dir runs/winter-smoke`: all sources are prepared, but a tiny randomly initialized model trains for three CPU updates on capped windows. This checks plumbing, not the 14M model's quality.
+
+Verification: **62 tests pass**, including exact resumed batches/weights, target accounting, held-out overlap exclusion, and unchanged original split files. Single-branch and optional-control smoke runs completed; changed frozen material was rejected. Recovery after the final optimizer save reproduced identical weights without another update. The tiny F16 GGUF passed five tokenizer probes and three greedy first-token checks, and its HF package retained the source manifest. No full-size quality-training run or Colab GPU benchmark was performed during implementation.
 
 ## Option 1: scene-focused fine-tuning
 
 The completed capacity experiment did not demonstrate sustained coherence. Its 42M branch overfit substantially. This bounded pilot changes the training examples and supervision, while retaining the original Christmas corpus, tokenizer, architecture, and source dropout. It is an experiment, not a promised coherence fix.
 
-**Copy the entire updated `model.py` into one Colab GPU cell.** All 189 source URLs and required code remain inline; no repository clone or helper module is needed. The cell installs pinned dependencies. The defaults near the top are:
+**To repeat the earlier scene experiment**, paste all of `model.py` into a Colab GPU cell and change `NOTEBOOK_ARGS` to the following. All original source URLs and required code remain inline; the cell installs pinned dependencies:
 
 ```python
 NOTEBOOK_ARGS = ["finetune-scenes", "--output-dir", "runs/christmas-scenes"]

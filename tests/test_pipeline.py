@@ -85,13 +85,14 @@ def test_pasted_cell_bootstraps_with_inline_arguments_without_file(tmp_path, mon
     exec(compile(Path(pipeline.__file__).read_text(), "<pasted-cell>", "exec"), namespace)
     assert namespace["ROOT"] == tmp_path
     assert namespace["sources"] == pipeline.sources
+    assert namespace["WINTER_SOURCES"] == pipeline.WINTER_SOURCES
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: calls.append(command))
     namespace["main"] = lambda argv: calls.append(argv)
     monkeypatch.setattr(sys, "argv", ["ipykernel_launcher", "-f", "kernel.json"])
     namespace["run_notebook"]()
     assert calls[0][1:5] == ["-m", "pip", "install", "-q"]
-    assert calls[1] == ["finetune-scenes", "--output-dir", "runs/christmas-scenes"]
+    assert calls[1] == ["finetune-winter", "--output-dir", "runs/christmas-winter"]
 
 
 def test_capacity_counts_amp_skips_and_discards_unsaved_attempts(tiny_model, tmp_path):

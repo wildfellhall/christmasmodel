@@ -2,6 +2,7 @@
 __pycache__/
 .pytest_cache/
 data/
+winter-data/
 runs/
 exports/
 llama.cpp/
