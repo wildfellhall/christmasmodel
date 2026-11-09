@@ -1,6 +1,11 @@
 """Export the best checkpoint to Hugging Face format and a downloadable GGUF.
 
-Colab cells (run after model.py finishes):
+Paste this entire file into one Colab cell after training. Edit
+EXPORT_NOTEBOOK_ARGS below for your checkpoint/output paths. The pasted cell
+installs its dependencies and uses those explicit arguments, never the kernel's
+internal command line. It exports locally and downloads GGUF; upload is opt-in.
+
+Alternatively, with a repository checkout, run these Colab cells:
     %pip install -q -r requirements-export.txt
     %run export.py --setup --download
 
@@ -24,6 +29,20 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
+# Pasted-cell defaults for the current winter continuation. Change --model-dir
+# to another best/ or retained review model if that is what you want to export.
+# Choose an empty output directory. Add --repo-id only to request a Hub upload.
+EXPORT_NOTEBOOK_ARGS = [
+    "--model-dir", "runs/christmas-winter/expanded/best",
+    "--output-dir", "exports/christmas-winter",
+    "--setup", "--outtype", "f16", "--verify", "--download",
+]
+# Inline equivalent of requirements-export.txt; no repository/helper file needed.
+EXPORT_NOTEBOOK_REQUIREMENTS = [
+    "torch>=2.6,<3", "transformers==4.57.6", "tokenizers==0.22.2", "accelerate==1.12.0",
+    "huggingface-hub==0.36.2", "numpy>=2.2.6,<3", "requests>=2.32,<3", "safetensors>=0.4",
+    "sentencepiece==0.2.1", "protobuf>=4.21,<5",
+]
 LLAMA_COMMIT = "7d7f0287530bc8981690f361d8c1627dbae1c99a"
 TOKENIZER_PROBES = [
     "On Christmas Eve, the snow fell softly.",
@@ -285,10 +304,21 @@ def main(argv=None):
     parser.add_argument("--repo-id", help="Optional Hugging Face upload destination: owner/model-name")
     parser.add_argument("--upload-only", action="store_true", help="Upload/retry an existing export without converting again")
     parser.add_argument("--public", action="store_true", help="Create a public Hub repo (default: private)")
-    parser.add_argument("--download", action="store_true", help="Colab browser download; invoke with %%run")
+    parser.add_argument("--download", action="store_true", help="Colab browser download; paste the cell or invoke with %%run")
     args = parser.parse_args(argv)
     export_model(args)
 
 
+def run_export_notebook():
+    """Install inline dependencies and isolate export settings from Jupyter argv."""
+    import importlib
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", *EXPORT_NOTEBOOK_REQUIREMENTS], check=True)
+    importlib.invalidate_caches()
+    main(EXPORT_NOTEBOOK_ARGS)
+
+
 if __name__ == "__main__":
-    main()
+    if "__file__" in globals():
+        main()  # python export.py ... or %run export.py ...
+    else:
+        run_export_notebook()  # Entire file pasted into one notebook cell.

@@ -82,7 +82,9 @@ Outputs include:
 - `expanded/reviews/step-N/model/`: retained weights at each review, independently selectable for prose quality.
 - `comparison.json`, `blind_best_full.csv`, `blind_final_full.csv`, corresponding short panels, and `review_key.json`: losses and blind baseline/treatment comparisons. Human ratings are preserved on completed resume. No automatic coherence winner is declared.
 
-The existing `export.py` accepts the best or any review model and now carries `supplementary_sources.json` into the HF package:
+The existing `export.py` accepts the best or any review model and carries `supplementary_sources.json` into the HF package. **For one-cell usage, paste all of `export.py` into Colab after training.** Its `EXPORT_NOTEBOOK_ARGS` defaults to `runs/christmas-winter/expanded/best`, exports to `exports/christmas-winter`, installs dependencies, sets up the pinned converter, verifies F16 output and downloads GGUF. Edit those paths near the top if needed. The cell uses explicit arguments, so Jupyter's internal `-f .../kernel.json` is never parsed. It does not upload unless you add `--repo-id`.
+
+With a repository checkout, the explicit `%run` command remains:
 
 ```python
 %run export.py --model-dir /content/runs/christmas-winter/expanded/best --output-dir /content/exports/winter --setup --outtype f16 --verify --download
