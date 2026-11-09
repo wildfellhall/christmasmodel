@@ -19,8 +19,10 @@ from model import (
     download_book,
     generate_samples,
     group_books,
+    load_continuation,
     loss_sums,
     read_sources,
+    select_continuation_result,
     split_groups,
     token_metrics,
 )
@@ -155,3 +157,37 @@ def test_export_rejects_tokenizer_changes(tiny_model):
     tokenizer.backend_tokenizer.normalizer = normalizers.Lowercase()
     with pytest.raises(ValueError, match="byte-level"):
         validate_tokenizer(tokenizer)
+
+
+def test_continuation_checks_data_and_tokenizer(tiny_model, tmp_path):
+    from tokenizers import normalizers
+    model, tokenizer = tiny_model
+    source = tmp_path / "best"
+    model.save_pretrained(source)
+    tokenizer.save_pretrained(source)
+    (source / "training_summary.json").write_text(json.dumps({"dataset_sha256": "original-data"}))
+    loaded = load_continuation(source, tokenizer, "original-data")
+    assert all(torch.equal(value, loaded.state_dict()[key]) for key, value in model.state_dict().items())
+    with pytest.raises(ValueError, match="dataset differs"):
+        load_continuation(source, tokenizer, "changed-data")
+    tokenizer.backend_tokenizer.normalizer = normalizers.Lowercase()
+    with pytest.raises(ValueError, match="tokenizer differs"):
+        load_continuation(source, tokenizer, "original-data")
+
+
+@pytest.mark.parametrize("trained_nll,retain", [(4.1, True), (None, True), (3.8, False)])
+def test_continuation_keeps_starting_weights_unless_validation_improves(tiny_model, tmp_path, trained_nll, retain):
+    model, _ = tiny_model
+    initial = tmp_path / "initial"
+    model.save_pretrained(initial)
+    original = {name: value.clone() for name, value in model.state_dict().items()}
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.add_(.5)
+    changed = {name: value.clone() for name, value in model.state_dict().items()}
+    checkpoint, nll, retained = select_continuation_result(model, initial, 3.9, trained_nll, "checkpoint-250")
+    assert retained == retain
+    assert checkpoint == (str(initial) if retain else "checkpoint-250")
+    assert nll == (3.9 if retain else trained_nll)
+    expected = original if retain else changed
+    assert all(torch.equal(value, model.state_dict()[name]) for name, value in expected.items())

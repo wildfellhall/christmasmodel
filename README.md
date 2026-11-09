@@ -94,6 +94,33 @@ subprocess.run(command, check=True)  # First run
 
 The default `/content` filesystem is temporary. Resume is available from the first saved checkpoint, and verifies that the dataset, tokenizer, and training settings match. Do not use `--rebuild` when resuming. Use a new output directory for another experiment. For less GPU memory, use `--batch-size 4 --accumulation 8` from the start of a new run.
 
+### Continue after a completed run
+
+The first reported full run reached 12 epochs with validation NLL still falling: 3.9746 at step 3500 to 3.9171 at step 4750. Its test perplexity was 56.88, while the shared sample still contained broken clauses and inconsistent descriptions. This supports testing additional training; it does not establish that further loss improvement will produce coherent stories. Training loss is measured with dropout enabled, so its numerical gap from validation loss is not a precise overfitting estimate.
+
+To continue that model, paste the **updated** `model.py` into a cell and replace `NOTEBOOK_ARGS` near the top with:
+
+```python
+NOTEBOOK_ARGS = [
+    "train",
+    "--continue-from", "/content/runs/christmas/best",
+    "--data-dir", "/content/data",
+    "--output-dir", "/content/runs/christmas-stage2",
+    "--epochs", "6",
+    "--learning-rate", "1e-4",
+    "--warmup-ratio", "0.03",
+    "--patience", "4",
+]
+```
+
+Use the actual saved paths if training under another working directory or on Drive. Both the source model and its original prepared `data/` must still exist. `--continue-from` also accepts `/content/runs/christmas/checkpoint-4750`. Initial runs still train from random weights; continuation loads only your existing project model. Nothing is downloaded from a pretrained model repository.
+
+The continuation inherits the model's architecture, context, dropout, and tokenizer. It verifies the dataset fingerprint, starts a fresh optimizer and schedule, warms up to `1e-4`, and decays to `1e-5`. Six epochs is an upper bound; four evaluations without meaningful improvement can stop it earlier. Keep other settings unchanged for this experiment. Step numbers restart at zero for the new stage.
+
+The original run remains untouched. The new output directory saves an `initial/` snapshot, `initial_samples.json`, and `continuation.json`. It evaluates the starting model on the same validation data and only selects new weights if they beat that baseline. Compare the fixed-prompt initial samples with the new `best/samples.json` to assess grammar and scene consistency as well as loss. This selection uses validation, not test results.
+
+If the new stage is interrupted, use the same options but **replace** `--continue-from` and its path with `--resume`. This restores the new stage's optimizer/scheduler/RNG rather than starting another stage. `--resume` preserves an existing training budget; changing its epoch or LR settings is not a continuation mechanism.
+
 ## Export weights and download GGUF
 
 After training, install the exporter dependencies. These preserve Colab's CUDA PyTorch installation.
@@ -165,6 +192,6 @@ python -m pytest -q
 python model.py train --smoke-test --output-dir runs/smoke
 ```
 
-The smoke test uses a tiny CPU model and limited windows; its scores and samples do not measure the full model's quality. Implementation checks cover real-corpus preparation, eleven regression tests, a brief training run with the full 13,989,888-parameter/512-context configuration, and checkpoint resumption with identical final weights. Both F16 (28.7 MB) and Q8 (15.8 MB) exports of that configuration loaded in llama.cpp, matched all five tokenizer probes, and matched three greedy first-token predictions against Hugging Face. A full twelve-epoch training run and output-quality assessment remain for Colab.
+The smoke test uses a tiny CPU model and limited windows; its scores and samples do not measure the full model's quality. Implementation checks cover real-corpus preparation, fifteen regression tests, brief training and continuation runs with the full 13,989,888-parameter/512-context configuration, and checkpoint resumption with identical final weights. Continuation checks cover source-weight identity, data/tokenizer compatibility, and retaining the starting weights when validation does not improve. Both F16 (28.7 MB) and Q8 (15.8 MB) exports of that configuration loaded in llama.cpp, matched all five tokenizer probes, and matched three greedy first-token predictions against Hugging Face. The twelve-epoch quality results above were supplied by the user; the proposed six-epoch continuation has not yet been evaluated for prose quality.
 
 The implementation follows the [Transformers GPT-2 interface](https://huggingface.co/docs/transformers/v4.57.6/en/model_doc/gpt2) and [Hugging Face Hub upload API](https://huggingface.co/docs/huggingface_hub/guides/upload). [Poetry50M](https://github.com/wildfellhall/Poetry50M) informed the custom-tokenizer approach; its larger architecture and incomplete training script were not copied wholesale.

@@ -612,6 +612,39 @@ def dataset_signature(data):
     return digest.hexdigest()
 
 
+def load_continuation(source, tokenizer, signature):
+    """Load this project's own weights, checking the original data and token IDs."""
+    from transformers import AutoTokenizer, GPT2LMHeadModel
+    source = Path(source).resolve()
+    records = [source / "provenance.json", source / "training_summary.json", source.parent / "run_config.json"]
+    record = next((path for path in records if path.is_file()), None)
+    if record is None:
+        raise ValueError("Continuation requires a project best/ or checkpoint directory with dataset provenance")
+    if json.loads(record.read_text()).get("dataset_sha256") != signature:
+        raise ValueError("Continuation dataset differs from the source run; keep its prepared data/tokenizer")
+    saved_tokenizer = AutoTokenizer.from_pretrained(source, local_files_only=True)
+    if (saved_tokenizer.backend_tokenizer.to_str() != tokenizer.backend_tokenizer.to_str()
+            or saved_tokenizer.special_tokens_map != tokenizer.special_tokens_map):
+        raise ValueError("Continuation tokenizer differs from the prepared tokenizer")
+    model = GPT2LMHeadModel.from_pretrained(source, local_files_only=True)
+    if (model.config.vocab_size != len(tokenizer)
+            or model.config.eos_token_id != tokenizer.eos_token_id
+            or model.config.pad_token_id != tokenizer.pad_token_id):
+        raise ValueError("Continuation model and tokenizer IDs disagree")
+    return model
+
+
+def select_continuation_result(model, initial, initial_nll, trained_nll, trained_checkpoint):
+    """The continuation must beat its starting model on the same validation data."""
+    from transformers import GPT2LMHeadModel
+    retained_initial = trained_nll is None or initial_nll <= trained_nll
+    if retained_initial:
+        original = GPT2LMHeadModel.from_pretrained(initial, local_files_only=True)
+        model.load_state_dict(original.state_dict())
+        return str(initial), initial_nll, True
+    return trained_checkpoint, trained_nll, False
+
+
 def training(args):
     import torch
     from transformers import (
@@ -625,8 +658,8 @@ def training(args):
         set_seed,
     )
     from transformers.trainer_utils import get_last_checkpoint
-    if args.resume and args.rebuild:
-        raise ValueError("Do not rebuild a dataset while resuming an existing run")
+    if (args.resume or args.continue_from) and args.rebuild:
+        raise ValueError("Do not rebuild a dataset while resuming or continuing an existing model")
     report = prepare(args)
     if args.smoke_test:
         args.layers, args.width, args.heads, args.block_size = 2, 64, 2, 64
@@ -645,33 +678,57 @@ def training(args):
     elif out.exists() and any(out.iterdir()):
         raise ValueError("Output directory is not empty; use --resume or a new --output-dir")
     tokenizer = AutoTokenizer.from_pretrained(data / "tokenizer", local_files_only=True)
-    tokenizer.model_max_length = args.block_size
     signature = dataset_signature(data)
+    continuation = None
+    initial = out / "initial"
+    if args.continue_from:
+        source = Path(args.continue_from).resolve()
+        if out.resolve() == source or out.resolve() in source.parents:
+            raise ValueError("Continuation needs a separate output directory from its source run")
+        model = load_continuation(source, tokenizer, signature)
+        continuation = {"source": str(source), "dataset_sha256": signature}
+    elif resume and (out / "continuation.json").exists():
+        continuation = json.loads((out / "continuation.json").read_text())
+        model = load_continuation(initial, tokenizer, signature)
+    if continuation is not None:
+        # Continue the same architecture, context, and regularization. CLI size
+        # settings apply only to new randomly initialized models.
+        args.layers, args.width, args.heads = model.config.n_layer, model.config.n_embd, model.config.n_head
+        args.block_size, args.dropout = model.config.n_positions, model.config.resid_pdrop
+        model.config.use_cache = False
+    tokenizer.model_max_length = args.block_size
     settings = {"dataset_sha256": signature, "layers": args.layers, "width": args.width,
                 "heads": args.heads, "block_size": args.block_size, "dropout": args.dropout,
                 "batch_size": args.batch_size, "accumulation": args.accumulation,
                 "learning_rate": args.learning_rate, "epochs": args.epochs, "max_steps": args.max_steps,
                 "seed": args.seed, "train_limit": args.train_limit, "eval_limit": args.eval_limit,
-                "eval_steps": args.eval_steps, "patience": args.patience, "smoke_test": args.smoke_test}
+                "eval_steps": args.eval_steps, "patience": args.patience, "smoke_test": args.smoke_test,
+                "warmup_ratio": args.warmup_ratio}
+    if continuation is not None:
+        settings["continue_from"] = continuation["source"]
     if resume:
         prior = json.loads((out / "run_config.json").read_text())
+        prior.setdefault("warmup_ratio", .05)  # Compatibility with the original script.
         if prior != settings:
             raise ValueError("Run settings or dataset differ from saved run_config.json; use a new run")
     out.mkdir(parents=True, exist_ok=True)
     write_json(out / "run_config.json", settings)
-    config = GPT2Config(vocab_size=len(tokenizer), n_positions=args.block_size, n_ctx=args.block_size,
-                        n_embd=args.width, n_layer=args.layers, n_head=args.heads, n_inner=4*args.width,
-                        activation_function="gelu_new", resid_pdrop=args.dropout,
-                        embd_pdrop=args.dropout, attn_pdrop=.1, initializer_range=.02,
-                        bos_token_id=tokenizer.bos_token_id, eos_token_id=tokenizer.eos_token_id,
-                        pad_token_id=tokenizer.pad_token_id, tie_word_embeddings=True, use_cache=False)
-    # This constructor initializes ALL weights randomly. Never load pretrained GPT-2.
-    model = GPT2LMHeadModel(config)
+    if continuation is None:
+        config = GPT2Config(vocab_size=len(tokenizer), n_positions=args.block_size, n_ctx=args.block_size,
+                            n_embd=args.width, n_layer=args.layers, n_head=args.heads, n_inner=4*args.width,
+                            activation_function="gelu_new", resid_pdrop=args.dropout,
+                            embd_pdrop=args.dropout, attn_pdrop=.1, initializer_range=.02,
+                            bos_token_id=tokenizer.bos_token_id, eos_token_id=tokenizer.eos_token_id,
+                            pad_token_id=tokenizer.pad_token_id, tie_word_embeddings=True, use_cache=False)
+        # Initial runs initialize ALL weights randomly. Continuations load only
+        # the user's existing project model, never external pretrained GPT-2.
+        model = GPT2LMHeadModel(config)
     parameters = model.num_parameters()
     train_set = BookWindows(data / "train.jsonl", args.block_size, args.train_limit)
     val_set = BookWindows(data / "validation.jsonl", args.block_size, args.eval_limit)
     effective_batch = args.batch_size * args.accumulation
-    print(f"Random GPT-2: {parameters:,} parameters; {len(train_set):,} training windows; "
+    origin = "Continued" if continuation is not None else "Random"
+    print(f"{origin} GPT-2: {parameters:,} parameters; {len(train_set):,} training windows; "
           f"effective batch {effective_batch} (~{effective_batch*(args.block_size-1):,} targets/update).", flush=True)
     print(f"Unique training target tokens/parameter: {report['splits']['train']['target_tokens']/parameters:.2f}. "
           "Repeated epochs do not add new language evidence.", flush=True)
@@ -693,7 +750,7 @@ def training(args):
         per_device_train_batch_size=args.batch_size, per_device_eval_batch_size=args.batch_size,
         gradient_accumulation_steps=args.accumulation, learning_rate=args.learning_rate,
         weight_decay=.1, adam_beta1=.9, adam_beta2=.95, adam_epsilon=1e-8,
-        max_grad_norm=1., warmup_ratio=.05, lr_scheduler_type="cosine_with_min_lr",
+        max_grad_norm=1., warmup_ratio=args.warmup_ratio, lr_scheduler_type="cosine_with_min_lr",
         lr_scheduler_kwargs={"min_lr_rate": .1}, optim="adamw_torch",
         eval_strategy="steps", eval_steps=args.eval_steps, save_strategy="steps", save_steps=args.eval_steps,
         logging_steps=min(25, args.eval_steps), save_total_limit=2,
@@ -713,8 +770,30 @@ def training(args):
         raise ValueError("Training would finish before its first evaluation; lower --eval-steps")
     if resume and json.loads((Path(resume) / "trainer_state.json").read_text())["global_step"] >= planned_steps:
         raise ValueError("This run already reached its step budget; use generate/evaluate or start a new run")
+    if continuation is not None and not resume:
+        # Snapshot the starting weights before creating a fresh optimizer. The
+        # source remains untouched and resumption no longer needs its directory.
+        model.save_pretrained(initial, safe_serialization=True)
+        tokenizer.save_pretrained(initial)
+        write_json(initial / "provenance.json", {"dataset_sha256": signature})
+        baseline = trainer.evaluate()
+        continuation["initial_validation_nll"] = baseline["eval_nll"]
+        write_json(out / "continuation.json", continuation)
+        write_json(out / "initial_samples.json", generate_samples(model, tokenizer, PROMPTS, args.sample_tokens))
+        print(f"Continuation baseline NLL: {baseline['eval_nll']:.6f}. "
+              "Fresh optimizer/schedule; update numbering restarts at zero.", flush=True)
     trainer.train(resume_from_checkpoint=resume)
     # Trainer has restored the best VALIDATION checkpoint, not necessarily the last.
+    if continuation is not None:
+        continuation["best_new_validation_nll"] = trainer.state.best_metric
+        selected, score, retained = select_continuation_result(
+            model, initial, continuation["initial_validation_nll"],
+            trainer.state.best_metric, trainer.state.best_model_checkpoint)
+        trainer.state.best_model_checkpoint, trainer.state.best_metric = selected, score
+        continuation["retained_initial_model"] = retained
+        write_json(out / "continuation.json", continuation)
+        print(f"Continuation selection: {'starting model retained' if retained else 'improved checkpoint selected'}; "
+              f"validation NLL {score:.6f}.", flush=True)
     model.config.use_cache = True
     best = out / "best"
     trainer.save_model(str(best))
@@ -727,7 +806,7 @@ def training(args):
                "best_validation_nll": trainer.state.best_metric, "global_step": trainer.state.global_step,
                "dataset_sha256": signature, "smoke_test": args.smoke_test,
                "limited_data": bool(args.train_limit or args.eval_limit), "test": metrics,
-               "corpus": report, "run": settings}
+               "corpus": report, "run": settings, "continuation": continuation}
     write_json(best / "training_summary.json", summary)
     write_json(out / "test_metrics.json", metrics)
     final_samples = generate_samples(model, tokenizer, PROMPTS, args.sample_tokens)
@@ -759,6 +838,7 @@ guaranteed. The limited historical corpus can produce memorized passages,
 repetition, dated language, and historical biases. Repeated epochs are not new data.
 
 Best validation NLL: {summary['best_validation_nll']}
+Continuation details: {json.dumps(summary.get('continuation'))}
 Test token perplexity: {summary['test'].get('test_perplexity')}
 Smoke test: {summary['smoke_test']}; limited data: {summary['limited_data']}.
 Scores use this model's tokenizer and are not directly comparable to other vocabularies.
@@ -827,13 +907,16 @@ def main(argv=None):
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--accumulation", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--warmup-ratio", type=float, default=.05)
     parser.add_argument("--epochs", type=float, default=12)
     parser.add_argument("--max-steps", type=int, default=-1, help="Optional optimizer-step cap")
     parser.add_argument("--eval-steps", type=int, default=250)
     parser.add_argument("--sample-steps", type=int, default=250)
     parser.add_argument("--sample-tokens", type=int, default=96)
     parser.add_argument("--patience", type=int, default=6, help="Validation checks without a meaningful improvement")
-    parser.add_argument("--resume", nargs="?", const="latest", help="Resume latest or a checkpoint directory")
+    restart = parser.add_mutually_exclusive_group()
+    restart.add_argument("--resume", nargs="?", const="latest", help="Resume latest or a checkpoint directory")
+    restart.add_argument("--continue-from", help="Start a new stage from this project's best/ or checkpoint weights; fresh optimizer/schedule")
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--smoke-test", action="store_true", help="Tiny CPU model, 3 updates, limited data; not quality training")
     parser.add_argument("--train-limit", type=int, help="Diagnostic window cap; omitted for full training")
@@ -844,6 +927,8 @@ def main(argv=None):
         parser.error("width must divide by heads; block-size >= 8; vocab-size >= 258")
     if not 0 < args.min_success_rate <= 1 or not 0 <= args.dropout < 1:
         parser.error("min-success-rate must be in (0,1]; dropout in [0,1)")
+    if not 0 <= args.warmup_ratio < 1:
+        parser.error("warmup-ratio must be in [0,1)")
     if any(x <= 0 for x in [args.layers, args.heads, args.width, args.batch_size, args.accumulation,
                             args.eval_steps, args.sample_steps, args.sample_tokens, args.patience,
                             args.epochs, args.learning_rate]):
