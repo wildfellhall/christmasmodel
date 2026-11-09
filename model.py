@@ -572,7 +572,57 @@ def token_metrics(prediction):
     return {"nll": nll, "perplexity": math.exp(min(nll, 50)), "scored_tokens": int(values[:, 1].sum())}
 
 
-def generate_samples(model, tokenizer, prompts, max_new_tokens=96, seed=1234):
+def contrastive_generate(model, inputs, max_new_tokens, pad_id, eos_id, top_k=4, alpha=.6):
+    """Single unpadded GPT-2 sequence; caller supplies eval/inference mode.
+
+    Rank top-k candidates by (1-alpha)*probability - alpha*max_cosine_to_context.
+    Cache branches are copied, then only the chosen branch is retained. Kept
+    inline for standalone Colab use without downloading custom generation code.
+    """
+    import torch
+    from torch.nn import functional as F
+    from transformers import DynamicCache
+    if inputs.ndim != 2 or inputs.shape[0] != 1 or inputs.shape[1] == 0:
+        raise ValueError("Contrastive search requires one nonempty, unpadded prompt")
+    if not 0 <= alpha < 1 or not 1 <= top_k < model.config.vocab_size:
+        raise ValueError("Contrastive alpha must be in [0,1); top-k must be in [1,vocab_size)")
+    room = model.config.n_positions - inputs.shape[1]
+    if room <= 0 or max_new_tokens <= 0:
+        raise ValueError("Shorten the prompt and use a positive generation length")
+    output = model(inputs, attention_mask=torch.ones_like(inputs), use_cache=True,
+                   output_hidden_states=True, return_dict=True)
+    context = F.normalize(output.hidden_states[-1][0].float(), dim=-1)
+    cache = output.past_key_values.to_legacy_cache()
+    logits = output.logits[:, -1]
+    sequence = inputs
+    for _ in range(min(max_new_tokens, room)):
+        logits = logits.float().clone()
+        logits[:, pad_id] = -float("inf")
+        probabilities, candidates = logits.softmax(dim=-1).topk(top_k, dim=-1)
+        # DynamicCache is mutable. Separate candidate branches must never share
+        # the selected prefix cache's writable storage.
+        branches = DynamicCache.from_legacy_cache(tuple(
+            (key.repeat_interleave(top_k, dim=0), value.repeat_interleave(top_k, dim=0))
+            for key, value in cache))
+        candidate_output = model(candidates.reshape(top_k, 1), past_key_values=branches,
+            attention_mask=torch.ones((top_k, sequence.shape[1]+1), dtype=torch.long, device=inputs.device),
+            use_cache=True, output_hidden_states=True, return_dict=True)
+        hidden = F.normalize(candidate_output.hidden_states[-1][:, -1].float(), dim=-1)
+        penalty = (hidden @ context.T).max(dim=-1).values
+        selected = int(((1-alpha)*probabilities[0] - alpha*penalty).argmax())
+        token = candidates[:, selected:selected+1]
+        sequence = torch.cat((sequence, token), dim=1)
+        if int(token.item()) == eos_id:
+            break
+        context = torch.cat((context, hidden[selected:selected+1]), dim=0)
+        logits = candidate_output.logits[selected:selected+1, -1]
+        cache = tuple((key[selected:selected+1].contiguous(), value[selected:selected+1].contiguous())
+                      for key, value in candidate_output.past_key_values.to_legacy_cache())
+    return sequence
+
+
+def generate_samples(model, tokenizer, prompts, max_new_tokens=96, seed=1234,
+                     modes=("greedy", "sample"), include_token_ids=False):
     import torch
     device = next(model.parameters()).device
     was_training = model.training
@@ -595,16 +645,28 @@ def generate_samples(model, tokenizer, prompts, max_new_tokens=96, seed=1234):
                 if room <= 0:
                     raise ValueError("Prompt fills the context window; shorten it")
                 inputs = torch.tensor([ids], dtype=torch.long, device=device)
-                for mode in ("greedy", "sample"):
+                for mode in modes:
+                    if mode not in {"greedy", "sample", "blocked_sample", "contrastive"}:
+                        raise ValueError(f"Unknown decoding mode: {mode}")
                     kwargs = dict(max_new_tokens=min(max_new_tokens, room),
-                                  do_sample=mode == "sample", use_cache=True,
+                                  do_sample=mode in {"sample", "blocked_sample"}, use_cache=True,
                                   pad_token_id=tokenizer.pad_token_id, eos_token_id=tokenizer.eos_token_id,
                                   suppress_tokens=[tokenizer.pad_token_id])
-                    if mode == "sample":
+                    if mode in {"sample", "blocked_sample"}:
                         kwargs.update(temperature=.8, top_p=.92, top_k=40, repetition_penalty=1.08)
-                    output = model.generate(inputs, attention_mask=torch.ones_like(inputs), **kwargs)
-                    results.append({"prompt": prompt, "mode": mode,
-                                    "continuation": tokenizer.decode(output[0, len(ids):], skip_special_tokens=True)})
+                    if mode == "blocked_sample":
+                        kwargs["no_repeat_ngram_size"] = 4
+                    if mode == "contrastive":
+                        output = contrastive_generate(model, inputs, min(max_new_tokens, room),
+                                                      tokenizer.pad_token_id, tokenizer.eos_token_id)
+                    else:
+                        output = model.generate(inputs, attention_mask=torch.ones_like(inputs), **kwargs)
+                    tokens = output[0, len(ids):].tolist()
+                    row = {"prompt": prompt, "mode": mode,
+                           "continuation": tokenizer.decode(tokens, skip_special_tokens=True)}
+                    if include_token_ids:
+                        row["token_ids"] = tokens
+                    results.append(row)
     finally:
         model.train(was_training)
         if mps_state is not None:
@@ -1020,6 +1082,91 @@ def diagnose(args):
     return report
 
 
+def repetition_counts(tokens, n=4):
+    """Duplicate token n-grams within a continuation, not a coherence metric."""
+    grams = [tuple(tokens[i:i+n]) for i in range(max(0, len(tokens)-n+1))]
+    return {"ngrams": len(grams), "repeated_ngrams": len(grams)-len(set(grams))}
+
+
+def compare_decoding(args):
+    """Bounded generation comparison on the same model, prefixes, and lengths."""
+    import torch
+    from transformers import AutoTokenizer
+    if not args.model_dir:
+        raise ValueError("compare-decoding requires --model-dir pointing to a saved project model")
+    data, out = Path(args.data_dir), Path(args.output_dir)
+    if out.exists() and any(out.iterdir()):
+        raise ValueError("Use a new --output-dir for the decoding comparison")
+    signature = dataset_signature(data)
+    manifest = json.loads((data / "manifest.json").read_text())
+    if any(book["url"] not in sources for book in manifest):
+        raise ValueError("Data include sources outside the approved Christmas corpus")
+    tokenizer = AutoTokenizer.from_pretrained(data / "tokenizer", local_files_only=True)
+    model = load_continuation(args.model_dir, tokenizer, signature)
+    device = "cpu" if args.cpu else ("cuda" if torch.cuda.is_available() else
+                                     "mps" if torch.backends.mps.is_available() else "cpu")
+    model.to(device).eval()
+    prompts = [{"split": "fixed", "prompt": prompt,
+                "input_ids": tokenizer.encode(prompt, add_special_tokens=False)} for prompt in PROMPTS]
+    for split in ("train", "validation"):
+        dataset = BookWindows(data / f"{split}.jsonl", model.config.n_positions, limit=1)
+        prompts.extend({"split": split, **probe} for probe in
+                       corpus_probe_inputs(dataset, tokenizer, args.sample_tokens, args.seed))
+    modes = {
+        "greedy": {"do_sample": False},
+        "sample": {"temperature": .8, "top_p": .92, "top_k": 40, "repetition_penalty": 1.08},
+        "blocked_sample": {"temperature": .8, "top_p": .92, "top_k": 40,
+                           "repetition_penalty": 1.08, "no_repeat_ngram_size": 4},
+        "contrastive": {"top_k": 4, "penalty_alpha": .6},
+    }
+    seeds = [args.seed, args.seed+1]
+    out.mkdir(parents=True, exist_ok=True)
+    results = []
+    for index, prompt in enumerate(prompts):
+        print(f"\n[{index+1}/{len(prompts)} | {prompt['split']}] PREFIX: {prompt['prompt']}", flush=True)
+        if "reference_continuation" in prompt:
+            print(f"REFERENCE: {prompt['reference_continuation']}", flush=True)
+        for mode in modes:
+            for seed in (seeds if mode in {"sample", "blocked_sample"} else [args.seed]):
+                # Start each method from the same prefix and RNG seed. Never
+                # feed the reference or another method's generated tokens.
+                sample, = generate_samples(model, tokenizer, [prompt], args.sample_tokens, seed,
+                                           modes=(mode,), include_token_ids=True)
+                ids = [token for token in sample["token_ids"]
+                       if token not in {tokenizer.eos_token_id, tokenizer.pad_token_id}]
+                record = {"prompt_index": index, "split": prompt["split"], "seed": seed, **sample,
+                          "generated_tokens": len(ids),
+                          "ended_with_eos": bool(sample["token_ids"] and
+                                                 sample["token_ids"][-1] == tokenizer.eos_token_id),
+                          **repetition_counts(ids)}
+                results.append(record)
+                with (out / "samples.jsonl").open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                print(f"{mode.upper()} [seed {seed}]: {sample['continuation']}\n", flush=True)
+    metrics = {}
+    for mode in modes:
+        rows = [row for row in results if row["mode"] == mode]
+        total = sum(row["ngrams"] for row in rows)
+        metrics[mode] = {
+            "continuations": len(rows),
+            "mean_generated_tokens": sum(row["generated_tokens"] for row in rows)/len(rows),
+            "eos_endings": sum(row["ended_with_eos"] for row in rows),
+            "repeated_token_4gram_fraction": sum(row["repeated_ngrams"] for row in rows)/total if total else None,
+        }
+    report = {"model_dir": str(Path(args.model_dir).resolve()), "dataset_sha256": signature,
+              "weights_updated": False, "test_evaluated": False, "modes": modes, "sampling_seeds": seeds,
+              "max_new_tokens": args.sample_tokens, "prompts": prompts, "metrics": metrics, "samples": results,
+              "interpretation": "Duplicate 4-grams measure repetition, not meaning. Blocking forces this "
+              "measure down and may impair prose. Compare lengths/EOS and read all outputs for scene, "
+              "character, and grammatical consistency; no automatic winner is selected. A plausible "
+              "continuation need not match the reference. These few passages cannot establish general quality."}
+    write_json(out / "comparison.json", report)
+    print("\nDECODING COMPARISON (same weights; repetition is not coherence):")
+    print(json.dumps(metrics, indent=2))
+    print(f"Full comparison: {out / 'comparison.json'}")
+    return report
+
+
 def inference(args):
     import torch
     from transformers import AutoTokenizer, GPT2LMHeadModel, Trainer, TrainingArguments
@@ -1030,7 +1177,8 @@ def inference(args):
         device = "cpu" if args.cpu else ("cuda" if torch.cuda.is_available() else
                                         "mps" if torch.backends.mps.is_available() else "cpu")
         model.to(device)
-        for sample in generate_samples(model, tokenizer, [args.prompt], args.sample_tokens, args.seed):
+        modes = ("greedy", "sample") if args.decode_mode == "both" else (args.decode_mode,)
+        for sample in generate_samples(model, tokenizer, [args.prompt], args.sample_tokens, args.seed, modes=modes):
             print(f"\n[{sample['mode']}] {sample['prompt']}{sample['continuation']}")
         return
     summary = json.loads((path / "training_summary.json").read_text())
@@ -1048,7 +1196,8 @@ def inference(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["prepare", "train", "compare-dropout", "diagnose", "evaluate", "generate"])
+    parser.add_argument("command", choices=["prepare", "train", "compare-dropout", "diagnose",
+                                            "compare-decoding", "evaluate", "generate"])
     parser.add_argument("--corpus", help="Optional subset of the embedded Christmas URLs, as a Python sources list")
     parser.add_argument("--data-dir", default=str(ROOT / "data"))
     parser.add_argument("--seed", type=int, default=42)
@@ -1057,7 +1206,7 @@ def main(argv=None):
     parser.add_argument("--offline", action="store_true", help="Require cached Gutenberg downloads")
     parser.add_argument("--min-success-rate", type=float, default=.9)
     parser.add_argument("--output-dir", default=str(ROOT / "runs" / "christmas"))
-    parser.add_argument("--model-dir", help="Saved model for inference; required for diagnose, otherwise defaults to output-dir/best")
+    parser.add_argument("--model-dir", help="Saved project model; required for diagnose/compare-decoding")
     parser.add_argument("--layers", type=int, default=6)
     parser.add_argument("--width", type=int, default=384)
     parser.add_argument("--heads", type=int, default=6)
@@ -1086,6 +1235,9 @@ def main(argv=None):
     parser.add_argument("--diagnostic-windows", type=int, default=1024,
                         help="Maximum windows per train/validation split for diagnose")
     parser.add_argument("--prompt", default=PROMPTS[0])
+    parser.add_argument("--decode-mode", default="both",
+                        choices=["both", "greedy", "sample", "blocked_sample", "contrastive"],
+                        help="Decoding method for generate; both preserves the original greedy/sample output")
     args = parser.parse_args(argv)
     if args.heads <= 0 or args.width % args.heads or args.block_size < 8 or args.vocab_size < 258:
         parser.error("width must divide by heads; block-size >= 8; vocab-size >= 258")
@@ -1115,6 +1267,8 @@ def main(argv=None):
         compare_dropout(args)
     elif args.command == "diagnose":
         diagnose(args)
+    elif args.command == "compare-decoding":
+        compare_decoding(args)
     else:
         inference(args)
 

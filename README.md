@@ -173,6 +173,42 @@ It also prints three deterministic passage probes from each split: a prefix take
 
 The final `DIAGNOSTIC SUMMARY` and `diagnostics.json` record both losses, their gap, and whether input/output weights remain tied. A large gap can motivate investigating generalization; a small gap does not by itself prove insufficient capacity or optimization. Whole-book style differences also affect the gap. Review it alongside the passage probes before choosing another training run. The existing checkpoint and prepared dataset are unchanged.
 
+### Compare decoding on the existing checkpoint
+
+The reported dropout-disabled diagnostic measured training NLL **3.499251** on 518,000 targets and validation NLL **3.835750** on all 365,092 validation targets. Weights remained correctly tied. The shared training-book probe lost its soldier/ruined-home scene and entered an "old man" loop under greedy decoding; sampled output also lost scene consistency. The validation probe had similar failures. These examples show that the problem occurs on familiar text too. They do not establish whether model capacity, optimization, or the training objective is chiefly responsible.
+
+The next bounded comparison changes decoding while keeping weights fixed. [Contrastive search](https://arxiv.org/abs/2210.14140) ranks plausible next tokens using their probabilities and a penalty for similarity to earlier hidden representations. Its published results concern other models; improvement on this tiny Christmas model remains unverified. A second comparison simply blocks repeated four-token phrases during sampling. Neither method establishes coherence by reducing repetition alone.
+
+Paste the updated `model.py` into a Colab cell with:
+
+```python
+NOTEBOOK_ARGS = [
+    "compare-decoding",
+    "--model-dir", "/content/runs/christmas-dropout-comparison/lower-dropout/best",
+    "--data-dir", "/content/data",
+    "--output-dir", "/content/runs/christmas-decoding",
+    "--sample-tokens", "64",
+]
+```
+
+This generates from the three existing fixed openings and the same three train/three validation book prefixes. Every method starts with the same exact prefix tokens and a 64-token generation cap. The methods are greedy, the original sampling settings, those same sampling settings with `no_repeat_ngram_size=4`, and contrastive search with `k=4, alpha=0.6`. Both sampling methods use seeds 42 and 43 by default; the two other methods are deterministic. That produces 54 continuations, streamed to the notebook and `samples.jsonl`, with the complete report in `comparison.json`. It performs no training or test evaluation and downloads no model or custom generation code. Original weights, tokenizer, data, and training defaults are preserved.
+
+Read all passages for grammatical continuity, consistent characters/locations, and a plausible connection to the opening, especially the first two or three sentences. A valid continuation need not reproduce the reference. The summary reports duplicate token four-grams, output length, and EOS endings; it deliberately selects no automatic winner. Phrase blocking mechanically reduces the repetition metric and can still produce nonsense. Shorter outputs can also have fewer repetitions. If both alternatives remain incoherent across the passages, this comparison does not justify more decoding tweaks or another long run with the same training recipe.
+
+To generate from a single opening with one of these methods:
+
+```python
+NOTEBOOK_ARGS = [
+    "generate",
+    "--model-dir", "/content/runs/christmas-dropout-comparison/lower-dropout/best",
+    "--decode-mode", "contrastive",  # Or blocked_sample, sample, greedy, both
+    "--prompt", "There was a knock at the door. Mary put down her book",
+    "--sample-tokens", "64",
+]
+```
+
+Contrastive search is implemented directly in this file using the [published ranking rule](https://huggingface.co/blog/introducing-csearch). It evaluates four candidate tokens per step and costs more than greedy/sampling. The implementation matches a full-prefix reference calculation in CPU tests, caps output at the model's context limit, suppresses padding, and stops on EOS. GGUF weights remain exportable, but this Python decoding procedure is not encoded in GGUF; an external runtime may not provide the same search method.
+
 ## Export weights and download GGUF
 
 After training, install the exporter dependencies. These preserve Colab's CUDA PyTorch installation.
@@ -244,6 +280,6 @@ python -m pytest -q
 python model.py train --smoke-test --output-dir runs/smoke
 ```
 
-The smoke test uses a tiny CPU model and limited windows; its scores and samples do not measure the full model's quality. Implementation checks cover real-corpus preparation, regression tests, brief training and continuation runs with the full 13,989,888-parameter/512-context configuration, and checkpoint resumption with identical final weights. Continuation checks cover source-weight identity, data/tokenizer compatibility, retaining the starting weights when validation does not improve, and dropout behavior after reload. A short paired dropout run confirmed identical initial weights and validation scores, equal update counts, and skipped test evaluation. Diagnostic checks cover rejecting outside sources, preserving exact passage tokens, withholding reference continuations from generation, and an evaluation-only run on real-corpus windows. A separate gradient check on unequal-length real-corpus windows matched full-batch and accumulated gradients within 3e-8 in float32 with dropout disabled. Both F16 (28.7 MB) and Q8 (15.8 MB) exports of that configuration loaded in llama.cpp, matched all five tokenizer probes, and matched three greedy first-token predictions against Hugging Face. The full-run quality results above were supplied by the user; no improved prose quality is claimed for the dropout experiment or diagnostic.
+The smoke test uses a tiny CPU model and limited windows; its scores and samples do not measure the full model's quality. Implementation checks cover real-corpus preparation, regression tests, brief training and continuation runs with the full 13,989,888-parameter/512-context configuration, and checkpoint resumption with identical final weights. Continuation checks cover source-weight identity, data/tokenizer compatibility, retaining the starting weights when validation does not improve, and dropout behavior after reload. A short paired dropout run confirmed identical initial weights and validation scores, equal update counts, and skipped test evaluation. Diagnostic checks cover rejecting outside sources, preserving exact passage tokens, withholding reference continuations from generation, and an evaluation-only run on real-corpus windows. Decoding checks cover cached versus full-prefix contrastive ranking, the zero-penalty greedy limit, context limits, EOS stopping, and preserving weights/RNG/training mode. A separate gradient check on unequal-length real-corpus windows matched full-batch and accumulated gradients within 3e-8 in float32 with dropout disabled. Both F16 (28.7 MB) and Q8 (15.8 MB) exports of that configuration loaded in llama.cpp, matched all five tokenizer probes, and matched three greedy first-token predictions against Hugging Face. The full-run quality results above were supplied by the user; no improved prose quality is claimed for the dropout experiment, diagnostic, or decoding comparison.
 
 The implementation follows the [Transformers GPT-2 interface](https://huggingface.co/docs/transformers/v4.57.6/en/model_doc/gpt2) and [Hugging Face Hub upload API](https://huggingface.co/docs/huggingface_hub/guides/upload). [Poetry50M](https://github.com/wildfellhall/Poetry50M) informed the custom-tokenizer approach; its larger architecture and incomplete training script were not copied wholesale.

@@ -16,6 +16,7 @@ from model import (
     BookWindows,
     CausalCollator,
     clean_book,
+    contrastive_generate,
     corpus_probe_inputs,
     download_book,
     generate_samples,
@@ -23,6 +24,7 @@ from model import (
     load_continuation,
     loss_sums,
     read_sources,
+    repetition_counts,
     select_continuation_result,
     set_continuation_dropout,
     split_groups,
@@ -186,6 +188,81 @@ def test_passage_probes_use_exact_tokens_and_never_feed_reference(tiny_model, tm
     results = generate_samples(model, tokenizer, probes, max_new_tokens=4)
     assert len(results) == 2
     assert calls == [probe["input_ids"], probe["input_ids"]]
+
+
+def test_cached_contrastive_matches_independent_full_prefix_search(tiny_model):
+    model, tokenizer = tiny_model
+    model.eval()
+    inputs = torch.tensor([[0, 2, 3, 4, 5]])
+    alpha, top_k, steps = .6, 4, 6
+    # Full-prefix, one-candidate-at-a-time reference: deliberately no shared
+    # cache/branch-selection code from the implementation under test.
+    reference = inputs.clone()
+    with torch.inference_mode():
+        for _ in range(steps):
+            output = model(reference, use_cache=False, output_hidden_states=True)
+            logits = output.logits[0, -1].float().clone()
+            logits[tokenizer.pad_token_id] = -float("inf")
+            probabilities = logits.softmax(-1)
+            candidates = probabilities.topk(top_k).indices.tolist()
+            scores = []
+            for candidate in candidates:
+                extended = torch.cat((reference, torch.tensor([[candidate]])), dim=1)
+                hidden = model(extended, use_cache=False, output_hidden_states=True).hidden_states[-1][0]
+                similarity = torch.nn.functional.cosine_similarity(hidden[-1:].float(), hidden[:-1].float(), dim=-1)
+                scores.append((1-alpha)*probabilities[candidate].item() - alpha*similarity.max().item())
+            selected = candidates[max(range(top_k), key=lambda i: scores[i])]
+            reference = torch.cat((reference, torch.tensor([[selected]])), dim=1)
+            if selected == tokenizer.eos_token_id:
+                break
+        cached = contrastive_generate(model, inputs, steps, tokenizer.pad_token_id, tokenizer.eos_token_id,
+                                      top_k=top_k, alpha=alpha)
+    assert torch.equal(cached, reference)
+
+
+def test_contrastive_zero_penalty_matches_greedy_and_caps_context(tiny_model):
+    model, tokenizer = tiny_model
+    model.eval()
+    inputs = torch.tensor([[0] + [2, 3, 4]*20])  # Only three positions remain.
+    with torch.inference_mode():
+        result = contrastive_generate(model, inputs, 10, tokenizer.pad_token_id, tokenizer.eos_token_id, alpha=0)
+        greedy = model.generate(inputs, attention_mask=torch.ones_like(inputs), max_new_tokens=3,
+                                do_sample=False, suppress_tokens=[tokenizer.pad_token_id])
+    assert torch.equal(result, greedy)
+    assert result.shape[1] <= model.config.n_positions
+    assert tokenizer.pad_token_id not in result[0, inputs.shape[1]:].tolist()
+
+
+def test_contrastive_stops_at_eos(tiny_model, monkeypatch):
+    model, tokenizer = tiny_model
+    model.eval()
+    forward = model.forward
+    def force_eos(*args, **kwargs):
+        output = forward(*args, **kwargs)
+        output.logits.fill_(-1000)
+        output.logits[..., tokenizer.eos_token_id] = 1000
+        return output
+    monkeypatch.setattr(model, "forward", force_eos)
+    with torch.inference_mode():
+        output = contrastive_generate(model, torch.tensor([[0, 2, 3]]), 8,
+                                      tokenizer.pad_token_id, tokenizer.eos_token_id, alpha=0)
+    assert output.tolist() == [[0, 2, 3, tokenizer.eos_token_id]]
+
+
+def test_decoding_modes_preserve_rng_weights_and_training_mode(tiny_model):
+    model, tokenizer = tiny_model
+    model.train()
+    rng = torch.get_rng_state().clone()
+    weights = {key: value.clone() for key, value in model.state_dict().items()}
+    modes = ("blocked_sample", "contrastive")
+    samples = generate_samples(model, tokenizer, ["The snow"], 8, modes=modes, include_token_ids=True)
+    assert torch.equal(rng, torch.get_rng_state())
+    assert model.training
+    assert all(torch.equal(weights[key], value) for key, value in model.state_dict().items())
+    assert samples == generate_samples(model, tokenizer, ["The snow"], 8, modes=modes, include_token_ids=True)
+    assert repetition_counts(samples[0]["token_ids"])["repeated_ngrams"] == 0
+    assert repetition_counts([2]*8) == {"ngrams": 5, "repeated_ngrams": 4}
+    assert repetition_counts([2, 3]) == {"ngrams": 0, "repeated_ngrams": 0}
 
 
 def test_export_rejects_tokenizer_changes(tiny_model):
