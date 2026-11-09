@@ -17,23 +17,271 @@ from model import (
     CausalCollator,
     clean_book,
     contrastive_generate,
+    copied_training_spans,
     corpus_probe_inputs,
     download_book,
     generate_samples,
     group_books,
     grow_gpt2_depth,
+    latest_complete_checkpoint,
     load_continuation,
     loss_sums,
+    make_capacity_benchmark,
     read_sources,
     repetition_counts,
+    score_training_subset,
     select_continuation_result,
     set_continuation_dropout,
     split_groups,
     token_metrics,
+    training_exposure,
     training_trainer,
     verify_depth_growth,
     window_epoch_callback,
 )
+
+
+def test_resume_ignores_partially_written_checkpoint_directories(tmp_path):
+    required = ("model.safetensors", "config.json", "optimizer.pt", "scheduler.pt", "rng_state.pth")
+    for step in (2, 3, 4):
+        path = tmp_path / f"checkpoint-{step}"
+        path.mkdir()
+        for name in required:
+            (path / name).write_bytes(b"present")
+        (path / "trainer_state.json").write_text(json.dumps({"global_step": step}))
+    (tmp_path / "checkpoint-3/optimizer.pt").unlink()
+    (tmp_path / "checkpoint-4/trainer_state.json").write_text('{"global_step":')
+    assert latest_complete_checkpoint(tmp_path) == str(tmp_path / "checkpoint-2")
+    assert latest_complete_checkpoint(tmp_path, require_scaler=True) is None
+    (tmp_path / "checkpoint-2/scaler.pt").write_bytes(b"present")
+    assert latest_complete_checkpoint(tmp_path, require_scaler=True) == str(tmp_path / "checkpoint-2")
+    (tmp_path / "checkpoint-2/scheduler.pt").write_bytes(b"")
+    assert latest_complete_checkpoint(tmp_path) is None
+
+
+def test_capacity_and_legacy_cli_defaults_are_separate(monkeypatch):
+    import model as pipeline
+    captured = []
+    monkeypatch.setattr(pipeline, "compare_capacity", captured.append)
+    monkeypatch.setattr(pipeline, "training", captured.append)
+    pipeline.main(["compare-capacity"])
+    pipeline.main(["train"])
+    pipeline.main(["compare-capacity", "--model-seed", "123"])
+    capacity, legacy, replicate = captured
+    assert (capacity.epochs, capacity.dropout, capacity.attention_dropout) == (40, .05, .05)
+    assert capacity.random_window_offsets and capacity.batch_size*capacity.accumulation == 32
+    assert capacity.min_success_rate == 1 and capacity.benchmark_tokens == 192
+    assert (legacy.epochs, legacy.dropout, legacy.attention_dropout) == (12, .15, .1)
+    assert not legacy.random_window_offsets
+    assert replicate.model_seed == 123 and replicate.seed == capacity.seed == 42
+
+
+def test_pasted_cell_bootstraps_with_inline_arguments_without_file(tmp_path, monkeypatch):
+    import subprocess
+
+    import model as pipeline
+    namespace = {"__name__": "pasted_cell"}
+    monkeypatch.chdir(tmp_path)
+    exec(compile(Path(pipeline.__file__).read_text(), "<pasted-cell>", "exec"), namespace)
+    assert namespace["ROOT"] == tmp_path
+    assert namespace["sources"] == pipeline.sources
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: calls.append(command))
+    namespace["main"] = lambda argv: calls.append(argv)
+    monkeypatch.setattr(sys, "argv", ["ipykernel_launcher", "-f", "kernel.json"])
+    namespace["run_notebook"]()
+    assert calls[0][1:5] == ["-m", "pip", "install", "-q"]
+    assert calls[1] == ["compare-capacity", "--output-dir", "runs/christmas-capacity"]
+
+
+def test_capacity_counts_amp_skips_and_discards_unsaved_attempts(tiny_model, tmp_path):
+    from types import SimpleNamespace
+
+    from model import capacity_callback
+    model, tokenizer = tiny_model
+    args = SimpleNamespace(output_dir=tmp_path, benchmark_steps=100)
+    callback = capacity_callback(args, tokenizer, None)
+    state = SimpleNamespace(global_step=2, max_steps=10)
+    control = SimpleNamespace(should_save=False, should_evaluate=False)
+    optimizer = SimpleNamespace(step_was_skipped=True)
+    callback.on_step_end(None, state, control, optimizer=optimizer)
+    callback.on_step_end(None, state, control, optimizer=optimizer)
+    state.global_step = 4
+    callback.on_step_end(None, state, control, optimizer=optimizer)
+    assert callback.skipped_count(10) == 2
+    # Resume a saved step 2: step 4's discarded attempt must not survive.
+    state.global_step = 2
+    callback.on_train_begin(None, state, control, model=model)
+    assert callback.skipped_count(10) == 1
+
+
+def test_exposure_matches_shuffled_targets_including_partial_updates(tmp_path):
+    path = tmp_path / "train.jsonl"
+    path.write_text("\n".join(json.dumps({"id": str(i), "ids": list(range(n))})
+                              for i, n in enumerate([31, 18, 42])))
+    dataset = BookWindows(path, 16, random_offsets=True, seed=42)
+    batch, steps, examples, targets, updates = 4, 5, 0, 0, 0
+    for epoch in range(3):
+        dataset.set_training_epoch(epoch)
+        order = torch.randperm(len(dataset), generator=torch.Generator().manual_seed(42+epoch)).tolist()
+        for start in range(0, len(order), batch):
+            indices = order[start:start+batch]
+            targets += sum(len(dataset[i]["input_ids"])-1 for i in indices)
+            examples += len(indices)
+            updates += 1
+            if updates == steps:
+                break
+        if updates == steps:
+            break
+    result = training_exposure(dataset, batch, steps, 42)
+    assert result["scored_targets"] == targets and result["examples"] == examples
+    assert result["targets_per_complete_epoch"] == sum(len(book)-1 for book in dataset.books)
+
+
+def test_copy_detection_finds_exact_long_spans_without_crossing_books(tmp_path):
+    path = tmp_path / "train.jsonl"
+    first, second = list(range(100, 180)), list(range(500, 580))
+    path.write_text("\n".join(json.dumps({"id": name, "ids": ids})
+                              for name, ids in [("a", first), ("b", second)]))
+    dataset = BookWindows(path, 64)
+    generations = [[999]+first[9:54]+[888], first[-20:]+second[:20], first[:31], second[20:60]]
+    matches = copied_training_spans(generations, dataset)
+    assert matches[0] == {"matched_tokens": 45, "book_id": "a", "training_start_token": 9,
+                          "generated_start_token": 1}
+    assert matches[1]["matched_tokens"] == matches[2]["matched_tokens"] == 0
+    assert matches[3]["matched_tokens"] == 40 and matches[3]["book_id"] == "b"
+
+
+def test_training_diagnostic_preserves_rng_mode_and_window_epoch(tiny_model, tmp_path):
+    model, tokenizer = tiny_model
+    path = tmp_path / "train.jsonl"
+    path.write_text(json.dumps({"id": "46", "ids": [0]+list(range(2, 62))*3+[0]}))
+    dataset = BookWindows(path, 16, random_offsets=True, seed=42)
+    dataset.set_training_epoch(3)
+    offsets = list(dataset.offsets)
+    model.train()
+    rng = torch.get_rng_state().clone()
+    first = score_training_subset(model, tokenizer, dataset, limit=5, batch_size=2)
+    assert model.training and torch.equal(torch.get_rng_state(), rng)
+    assert dataset.epoch == 3 and dataset.offsets == offsets
+    dataset.set_training_epoch(9)
+    second = score_training_subset(model, tokenizer, dataset, limit=5, batch_size=2)
+    assert first == second
+    assert first["windows"] == 5 and first["scored_tokens"] > 0
+
+
+def test_capacity_benchmark_is_frozen_readable_balanced_and_validation_only(tiny_model, tmp_path):
+    _, tokenizer = tiny_model
+    records = []
+    for book in range(3):
+        text = "\n\n".join(f'Élise watched. The snow falls. Christmas Eve was cold. "The snow falls!" {book} {i}.'
+                           for i in range(40))
+        records.append({"id": str(book), "ids": [0]+tokenizer.encode(text)+[0]})
+    (tmp_path / "validation.jsonl").write_text("\n".join(json.dumps(r) for r in records))
+    # No train/test file exists: benchmark construction cannot access either.
+    one = make_capacity_benchmark(tmp_path, tokenizer, "fixed-data", count=6,
+                                  prefix_min=8, prefix_max=30, generation_tokens=4)
+    assert one == make_capacity_benchmark(tmp_path, tokenizer, "fixed-data", count=6,
+                                          prefix_min=8, prefix_max=30, generation_tokens=4)
+    from collections import Counter
+    assert set(Counter(p["book_id"] for p in one["prompts"]).values()) == {2}
+    for prompt in one["prompts"]:
+        ids = records[int(prompt["book_id"])]["ids"]
+        start, length = prompt["start_token"], prompt["prefix_tokens"]
+        assert prompt["input_ids"] == ids[start:start+length]
+        assert prompt["reference_ids"] == ids[start+length:start+length+4]
+        assert prompt["prompt"][0].isalpha()
+        assert prompt["prompt"][-1] in '.!?"'
+        assert "\ufffd" not in prompt["prompt"]
+
+
+@pytest.mark.parametrize("interruption_step", [0, 2, 5])
+def test_capacity_training_resumes_optimizer_or_finalizes_without_extra_steps(
+        tiny_model, tmp_path, monkeypatch, interruption_step):
+    import argparse
+
+    from transformers import TrainerCallback
+
+    import model as pipeline
+    _, tokenizer = tiny_model
+    data = tmp_path / "data"
+    data.mkdir()
+    tokenizer.save_pretrained(data / "tokenizer")
+    ids = [0]+list(range(2, 62))*9+[0]
+    for split in ("train", "validation", "test"):
+        (data / f"{split}.jsonl").write_text(json.dumps({"id": "46", "ids": ids}))
+    report = {"splits": {"train": {"target_tokens": len(ids)-1}}}
+    (data / "report.json").write_text(json.dumps(report))
+    signature = pipeline.dataset_signature(data)
+    benchmark = {"dataset_sha256": signature, "sampling_seeds": [42, 43], "generation_tokens": 4,
+                 "prompts": [{"prompt_id": "p0", "book_id": "46", "input_ids": ids[1:5],
+                              "prompt": tokenizer.decode(ids[1:5]), "reference_ids": ids[5:9]}]}
+    captured = []
+    original_training, original_trainer = pipeline.training, pipeline.training_trainer
+    monkeypatch.setattr(pipeline, "training", captured.append)
+    pipeline.main(["train", "--data-dir", str(data), "--cpu", "--layers", "1", "--width", "32",
+                   "--heads", "2", "--block-size", "128", "--batch-size", "2", "--accumulation", "2",
+                   "--max-steps", "5", "--eval-steps", "2", "--sample-steps", "20",
+                   "--sample-tokens", "4", "--random-window-offsets", "--skip-test"])
+    base = captured[0]
+    base.fixed_budget, base.benchmark_steps = True, 2
+    base.capacity_benchmark, base.benchmark_sha256 = benchmark, pipeline.json_digest(benchmark)
+    monkeypatch.setattr(pipeline, "training", original_training)
+    monkeypatch.setattr(pipeline, "prepare", lambda args: report)
+    trained_batches = []
+    stop = [None]
+
+    class Interrupt(TrainerCallback):
+        def on_step_end(self, args, state, control, **kwargs):
+            if stop[0] == 0 and state.global_step == 1:
+                raise InterruptedError("simulated interruption before first checkpoint")
+
+        def on_save(self, args, state, control, **kwargs):
+            if state.global_step == stop[0]:
+                raise InterruptedError("simulated Colab interruption after checkpoint persistence")
+
+    def observed_trainer(*args, **kwargs):
+        def observe(module, inputs, named):
+            if module.training and "labels" in named:
+                trained_batches.append(named["input_ids"].tolist())
+        kwargs["model"].register_forward_pre_hook(observe, with_kwargs=True)
+        trainer = original_trainer(*args, **kwargs)
+        trainer.add_callback(Interrupt())
+        return trainer
+
+    monkeypatch.setattr(pipeline, "training_trainer", observed_trainer)
+
+    def run(path, resume=None):
+        args = argparse.Namespace(**vars(base))
+        args.output_dir, args.resume = str(path), resume
+        return original_training(args)
+
+    full_path, interrupted_path = tmp_path / "full", tmp_path / "interrupted"
+    full = run(full_path)
+    full_batches = list(trained_batches)
+    trained_batches.clear()
+    stop[0] = interruption_step
+    with pytest.raises(InterruptedError):
+        run(interrupted_path)
+    before_resume = len(trained_batches)
+    stop[0] = None
+    resumed = run(interrupted_path, "latest")
+    if interruption_step == 0:
+        assert trained_batches[before_resume:] == full_batches  # Fresh seeded restart.
+    else:
+        assert trained_batches == full_batches
+    if interruption_step == 5:
+        assert len(trained_batches) == before_resume  # No sixth update during finalization.
+    assert full["training_exposure"] == resumed["training_exposure"]
+    assert full["best_validation_nll"] == resumed["best_validation_nll"]
+    assert resumed["global_step"] == 5
+    for relative in ["best", "reviews/step-5/model"]:
+        a = GPT2LMHeadModel.from_pretrained(full_path / relative).state_dict()
+        b = GPT2LMHeadModel.from_pretrained(interrupted_path / relative).state_dict()
+        assert all(torch.equal(value, b[key]) for key, value in a.items())
+    assert json.loads((interrupted_path / "reviews/step-5/coherence.json").read_text())["step"] == 5
+    for file in ("optimizer.pt", "scheduler.pt", "rng_state.pth"):
+        assert (interrupted_path / "checkpoint-5" / file).exists()
 
 
 def gutenberg(body, language="English"):

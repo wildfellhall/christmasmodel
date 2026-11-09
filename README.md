@@ -1,10 +1,88 @@
 # Christmasmodel
 
-Train a small literary continuation model **from random weights** on the Christmas and winter books listed directly in `model.py` and also in `corpus.py`. `model.py` downloads and cleans the books, learns a tokenizer, trains a `GPT2LMHeadModel(GPT2Config(...))`, prints checkpoint samples, and evaluates the best validation checkpoint on held-out books. `export.py` saves a Hugging Face package and converts the weights to GGUF.
+Train literary continuation models **from random weights** on the original Christmas and winter books. The pasted-cell default in [model.py](model.py) runs a fresh **14M versus 42M comparison**, with a frozen prose benchmark and no test-set evaluation. The original single-model workflow remains available through the train command. [export.py](export.py) saves a Hugging Face package and converts weights to GGUF.
 
 **The original Christmas source list is a hard constraint.** Training uses only these books. No supplementary corpus, externally generated training stories, or pretrained weights are used. Source-list overrides are limited to subsets of the original URLs.
 
-## Corpus findings and model choice
+## Fresh capacity comparison: current experiment
+
+**The pasted-cell default is now a fresh 14M versus 42M comparison.** Both models start from random weights and train on the same Christmas books. The uploaded checkpoint is not loaded. The experiment tests capacity under a shared recipe; it does not claim that 42M will be sufficient or that either model's optimal hyperparameters have been found.
+
+Copy all of [model.py](model.py) into one Colab GPU cell. Its source list, installation bootstrap, cleaning, tokenizer training, training loop, and evaluation code are inline. The default near the top is:
+
+~~~python
+NOTEBOOK_ARGS = ["compare-capacity", "--output-dir", "runs/christmas-capacity"]
+~~~
+
+The equivalent repository command is **python model.py compare-capacity**. It reuses prepared data/tokenizer files when present. On a fresh runtime it downloads the original URLs, removes detected duplicate editions, groups overlapping works across splits, and learns BPE on training books only. All 189 downloads must succeed. This command rejects corpus subsets, rebuilding existing data, continuation weights, and architecture overrides. Gutenberg can revise its texts; retain prepared data to reproduce the earlier corpus byte for byte.
+
+For persistence, mount Drive first and change the two paths in the pasted cell:
+
+~~~python
+from google.colab import drive
+drive.mount("/content/drive")
+~~~
+
+~~~python
+NOTEBOOK_ARGS = [
+    "compare-capacity",
+    "--data-dir", "/content/drive/MyDrive/christmasmodel/data",
+    "--output-dir", "/content/drive/MyDrive/christmasmodel/capacity-40",
+    # Add "--resume" when restarting this same experiment.
+]
+~~~
+
+Use **--plan-only** to freeze the settings and prompts and print the budget without training; add **--resume** to execute that saved plan afterward. Use **--smoke-test --output-dir runs/capacity-smoke** for two distinct tiny CPU architectures, three updates each. Smoke tests validate execution, not prose quality.
+
+| Decision | Configuration | Reason and limitation |
+| --- | --- | --- |
+| Capacity | 6 layers, width 384, 6 heads: **13,989,888** parameters; 12 layers, width 512, 8 heads: **42,286,080** | Tests a substantial difference from initialization. Both retain 64 dimensions per head and 4× MLP expansion. The larger model costs more per update; compute is not matched. |
+| Architecture | Standard GPT-2, gelu_new, tied embeddings, GPT-2 initialization | Preserves HF/GGUF export compatibility. The library scales residual output-projection initialization with depth. No inserted identity layers or external weights. |
+| Text/tokenizer | Existing 168/9/10 book splits; 8,192-token byte BPE | Keeps language evidence and evaluation difficulty fixed. No reweighting, rewritten stories, or changed training boundaries in this comparison. |
+| Context | 512; shifted training windows; fixed validation windows | Reuses tested windowing. Windows never cross books; padding is ignored and genuine EOS targets remain supervised. Shifts preserve row lengths and target counts. |
+| Batch | 8 sequences × 4 accumulation = 32 | Same effective batch and shuffled examples for both sizes. Before starting, 4 × 8 is an alternative if memory is tight. Effective batch must remain 32; do not change it on resume. |
+| Dropout | **0.05 for embeddings, residuals, and attention** | Uses the previously more promising low-dropout regime. Attention dropout is explicitly set, avoiding the historical 0.1 default. |
+| AdamW | LR 3e-4; betas (0.9, 0.95); epsilon 1e-8; decay 0.1; clip norm 1.0 | Shared starting recipe with responsive second-moment estimates and bounded gradients. Trainer excludes bias/norm parameters from weight decay. These are experimental choices, not measured optima. |
+| Schedule | 2% warmup; cosine decay to 3e-5 | On this corpus, 329 warmup updates span about 0.8 epoch. This avoids spending the original 5% warmup's roughly two full epochs warming up a 40-epoch run. No optimizer/schedule restarts between epochs. |
+| Budget | **40 epochs: 16,440 steps and 267,016,600 supervised targets per branch** on the audited corpus | Early stopping is disabled to preserve equal exposure. Short tails and partial final batches are counted exactly. Repetition is not new language evidence. Set a shorter --max-steps budget for both before starting if desired. |
+| Precision | BF16 on supported CUDA GPUs; otherwise CUDA FP16 with scaling; CPU/MPS FP32 | Retains FP32 parameters/optimizer state. FP16 overflow skips are reported separately from attempted steps. Explicit --precision fp32 is available; precision is frozen on resume. |
+| Seeds | Data/order/benchmark 42; model/dropout 42 | Example order is independent of architecture and generation RNG. For an independent initialization replicate, change only --model-seed and use a new output directory; the prepared split/tokenizer and prompts stay fixed. |
+| Validation/checkpoints | Every 250 updates, every review milestone, and the final update | Retains lowest validation token NLL and latest resumable state. The final partial interval is evaluated. Test books remain reserved. |
+| Training fit diagnostic | Fixed, evenly spread subset of up to 1,024 training windows at each prose review | Scores with dropout disabled and fixed offsets, without changing training RNG or the data iterator. Read this beside full validation NLL; dropout-on minibatch loss is not directly comparable. |
+| Quick samples | Three fixed openings, greedy and sampled, every 500 updates | Makes gross failures visible. Sampling preserves training RNG and model mode. |
+| Full prose panel | **20 frozen validation prefixes × seeds 42/43 × up to 192 generated tokens**, every 2,000 updates and at the end | Paragraph starts and sentence endings avoid prompts cut inside words. Prefixes span 64–160 tokens, leaving room for generation. Book-balanced selection occurs before either model trains; references never enter model input. |
+| Panel decoding | Temperature 0.8, top-p 0.92, top-k 40, repetition penalty 1.08 | Same established settings across models/checkpoints; no phrase blocking that mechanically forces repetition down. Length and EOS endings are reported. |
+
+Actual values and rationale are saved in **experiment.json**. Forty epochs is a fixed budget, not a prediction that coherence will appear. One initialization seed cannot establish a robust architecture advantage.
+
+### Outputs and the coherence decision
+
+- **experiment.json / benchmark.json:** immutable settings, data fingerprints, exact budget, and prompts.
+- **14m/ / 42m/:** independent runs. Each keeps up to two full optimizer checkpoints and a best/ model selected by validation NLL.
+- **reviews/step-N/** within each branch: sampled text, an editable review.csv, and a weights-only model/ snapshot. Earlier snapshots remain available if their prose is preferable. The default creates nine per branch; allow roughly 4 GB for model/checkpoint artifacts plus data.
+- **comparison.json:** losses, selected steps, exact exposure, applied/skipped updates, and paths. No automatic coherence winner.
+- **blind_review.csv:** mixed lowest-NLL checkpoint outputs with opaque IDs. Selection steps can differ between models; the summary records them.
+- **blind_final_review.csv:** outputs from both models at the same final training step, for a comparison at equal exposure. **review_key.json** reveals the model/checkpoint for both panels afterward.
+
+Rate grammar, character/scene continuity, event progression, and nonrepetition separately: **0 = clear failure, 1 = mixed/uncertain, 2 = sustained success**. Read failures and early endings as well as fluent examples. A valid continuation need not match the original reference. Also inspect periodic reviews: lowest validation NLL may not select the best prose.
+
+Each continuation is checked for the longest exact training-token span of at least 32 tokens. Only generated tokens are searched, excluding prompts. Hash candidates are verified against actual IDs. Zero means no match under this rule, not proof of originality. Copying and repetition are diagnostics, not coherence scores.
+
+### Resume and export
+
+Rerun with **--resume** and the same paths/settings. Completed branches are skipped. An interrupted branch restores optimizer, scheduler, RNG, offsets, and shuffled order from its latest complete checkpoint. Partially written checkpoint directories are skipped; FP16 recovery also requires the saved gradient scaler. Before the first checkpoint, it restarts from its seed. After the final checkpoint, it finalizes without an extra update. Precision, settings, dataset fingerprint, and prompts must match; bitwise replay across different hardware/library versions is not promised.
+
+Do not extend the budget on resume, since that would change the LR schedule. Recovery may regenerate a checkpoint's review CSV, so keep completed human ratings in a separate copy.
+
+After reviewing prose, export either best/ or a retained reviews/step-N/model using the existing exporter:
+
+~~~python
+%run export.py --model-dir /content/runs/christmas-capacity/42m/best --output-dir /content/exports/christmas-reviewed --setup --verify --download
+~~~
+
+Use the existing **evaluate --model-dir PATH --data-dir DATA** command for test evaluation only after selecting a model. The paired experiment never evaluates the test set.
+
+## Corpus findings and original model choice
 
 The repository contains **189 Gutenberg URLs**, not an embedded text corpus. All 189 downloaded successfully during the implementation audit. Two alternate editions were removed: 19608 duplicates 10679 (*The Story of the Other Wise Man*), and 17743 duplicates 30907 (*Rosemary*). The remaining 187 books contain **5,119,735 words**. The collection includes overlapping anthologies, short Christmas stories, and longer domestic novels; it is not uniformly Christmas prose.
 
@@ -18,7 +96,9 @@ With the default seed and tokenizer:
 
 See [corpus_audit.json](corpus_audit.json) for counts, duplicate editions, and detected overlaps, and [corpus_manifest.json](corpus_manifest.json) for titles, source URLs, source hashes, and split assignments. Gutenberg can revise its texts; each preparation writes its own fresh provenance report.
 
-| Setting | Default | Reason |
+The following defaults describe the original single-model train command, not the new pasted-cell comparison.
+
+| Setting | Legacy train default | Reason |
 | --- | --- | --- |
 | Parameters | **13,989,888** | Much less capacity than the 46.7M Poetry50M architecture |
 | Transformer | 6 layers, width 384, 6 heads | Several attention layers with 64 dimensions per head |
@@ -31,18 +111,18 @@ See [corpus_audit.json](corpus_audit.json) for counts, duplicate editions, and d
 | Training | Up to 12 epochs; batch 8 × accumulation 4 | About 16K target tokens per optimizer update |
 | Selection | Validation token NLL every 250 updates | Stop after 6 checks without ≥0.002 improvement; restore best |
 
-These are justified starting defaults, **not the result of a completed hyperparameter sweep**. There are only 0.48 unique training tokens per parameter; twelve passes do not make twelve distinct corpora. Short, stylistically consistent continuations are the intended use. Fluent output, sustained plot coherence, and novelty must be judged after the full Colab run. This is not a chatbot or an instruction-following model.
+These were starting heuristics, **not the result of a completed hyperparameter sweep**. Subsequent runs have not demonstrated sustained coherent prose. There are only 0.48 unique training tokens per parameter; twelve passes do not make twelve distinct corpora. Short, stylistically consistent continuations are the intended use. Fluent output, sustained plot coherence, and novelty must be judged after the full Colab run. This is not a chatbot or an instruction-following model.
 
-## Run in Google Colab
+## Original single-model workflow in Google Colab
 
-Select **Runtime → Change runtime type → GPU**. A T4 is a suitable starting point; the script selects FP16 on T4 and BF16 on supported GPUs. CPU execution works for verification but is slower. GPU execution has not been tested in the implementation environment.
+Select **Runtime → Change runtime type → GPU**. A T4 is a suitable starting point; the script selects FP16 on T4 and BF16 on supported GPUs. CPU execution works for verification but is slower. CUDA execution has not been tested in the implementation environment; CPU regression tests and an actual 42M forward/backward update on the local Apple accelerator have passed.
 
 **One continuous cell:** open [model.py](model.py), copy the entire file into one code cell in a fresh Colab GPU runtime, and run it. The cell installs its dependencies, uses its embedded list of all 189 URLs, and starts training automatically. It does not need a repository clone, `corpus.py`, or `requirements.txt`.
 
 Edit `NOTEBOOK_ARGS` near the top before running if needed:
 
 ```python
-NOTEBOOK_ARGS = ["train"]                # Full training (default)
+NOTEBOOK_ARGS = ["train"]                # Original single-model training
 # NOTEBOOK_ARGS = ["train", "--resume"]  # Resume using the same data/output paths
 # NOTEBOOK_ARGS = ["train", "--smoke-test", "--output-dir", "runs/smoke"]
 ```

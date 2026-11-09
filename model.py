@@ -5,6 +5,11 @@ one code cell, and run it. Dependencies are installed and training starts using
 the source list embedded below. No repository clone or corpus.py is required.
 Edit NOTEBOOK_ARGS below to change options or resume a notebook run.
 
+The default pasted cell runs compare-capacity: fresh 14M and 42M models on the
+same books, with a frozen prose benchmark and no test-set evaluation.
+Use --plan-only to inspect the budget, --smoke-test for a tiny execution check,
+and --resume to recover the pair without restarting completed branches.
+
 Colab GPU runtime, separate cells:
     !git clone https://github.com/wildfellhall/christmasmodel.git
     %cd /content/christmasmodel
@@ -30,7 +35,10 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
-NOTEBOOK_ARGS = ["train"]  # For example: ["train", "--resume"] or ["train", "--smoke-test"].
+# Fresh 14M/42M comparison on the same original books. Add "--resume" after a
+# disconnect. Use --smoke-test first to check the pipeline with tiny CPU models.
+# For Colab persistence, set --data-dir and --output-dir to mounted Drive paths.
+NOTEBOOK_ARGS = ["compare-capacity", "--output-dir", "runs/christmas-capacity"]
 NOTEBOOK_REQUIREMENTS = [
     "torch>=2.6,<3", "transformers==4.57.6", "tokenizers==0.22.2", "accelerate==1.12.0",
     "huggingface-hub==0.36.2", "numpy>=1.26,<3", "requests>=2.32,<3", "safetensors>=0.4",
@@ -850,6 +858,25 @@ def verify_depth_growth(source, grown, tokenizer):
             "dropout_disabled": True, "rtol": 1e-5, "atol": 1e-6}
 
 
+def latest_complete_checkpoint(directory, require_scaler=False):
+    """Ignore a checkpoint directory interrupted before its state files finished."""
+    required = ("model.safetensors", "config.json", "optimizer.pt", "scheduler.pt",
+                "rng_state.pth", "trainer_state.json")
+    if require_scaler:
+        required += ("scaler.pt",)
+    candidates = [path for path in Path(directory).glob("checkpoint-*")
+                  if path.is_dir() and path.name.removeprefix("checkpoint-").isdigit()]
+    for path in sorted(candidates, key=lambda p: int(p.name.split("-")[-1]), reverse=True):
+        try:
+            if (all((path / name).is_file() and (path / name).stat().st_size > 0 for name in required)
+                    and json.loads((path / "trainer_state.json").read_text())["global_step"]
+                    == int(path.name.split("-")[-1])):
+                return str(path)
+        except (OSError, ValueError, KeyError):
+            continue
+    return None
+
+
 def training(args):
     import torch
     from transformers import (
@@ -862,22 +889,33 @@ def training(args):
         set_seed,
     )
     from transformers.trainer_utils import get_last_checkpoint
+    fixed_budget = getattr(args, "fixed_budget", False)
+    attention_dropout = getattr(args, "attention_dropout", .1)
     if (args.resume or args.continue_from) and args.rebuild:
         raise ValueError("Do not rebuild a dataset while resuming or continuing an existing model")
     report = prepare(args)
-    if args.smoke_test:
+    if args.smoke_test and not fixed_budget:
         args.layers, args.width, args.heads, args.block_size = 2, 64, 2, 64
         args.batch_size, args.accumulation, args.max_steps = 2, 1, 3
         args.eval_steps, args.sample_steps, args.sample_tokens = 1, 1, 12
         args.train_limit, args.eval_limit, args.cpu = 16, 8, True
-    set_seed(args.seed)
+    precision = resolve_precision(getattr(args, "precision", "auto"), args.cpu)
+    model_seed = getattr(args, "model_seed", None)
+    model_seed = args.seed if model_seed is None else model_seed
+    set_seed(model_seed)
     data, out = Path(args.data_dir), Path(args.output_dir)
     resume = None
     if args.resume:
-        resume = get_last_checkpoint(str(out)) if args.resume == "latest" else str(Path(args.resume).resolve())
+        if args.resume == "latest":
+            resume = (latest_complete_checkpoint(out, require_scaler=precision == "fp16")
+                      if fixed_budget else get_last_checkpoint(str(out)))
+        else:
+            resume = str(Path(args.resume).resolve())
         if not resume:
-            raise ValueError("No checkpoint found to resume")
-        if Path(resume).resolve().parent != out.resolve():
+            if not fixed_budget or not (out / "run_config.json").exists():
+                raise ValueError("No checkpoint found to resume")
+            print("No saved optimizer checkpoint yet; restarting this fresh-model branch from its seed.", flush=True)
+        if resume and Path(resume).resolve().parent != out.resolve():
             raise ValueError("Resume checkpoint must belong to this --output-dir")
     elif out.exists() and any(out.iterdir()):
         raise ValueError("Output directory is not empty; use --resume or a new --output-dir")
@@ -912,25 +950,37 @@ def training(args):
         # CLI size settings apply only to new randomly initialized models.
         args.layers, args.width, args.heads = model.config.n_layer, model.config.n_embd, model.config.n_head
         args.block_size, args.dropout = model.config.n_positions, model.config.resid_pdrop
+        attention_dropout = model.config.attn_pdrop
         model.config.use_cache = False
     tokenizer.model_max_length = args.block_size
     settings = {"dataset_sha256": signature, "layers": args.layers, "width": args.width,
                 "heads": args.heads, "block_size": args.block_size, "dropout": args.dropout,
                 "batch_size": args.batch_size, "accumulation": args.accumulation,
                 "learning_rate": args.learning_rate, "epochs": args.epochs, "max_steps": args.max_steps,
-                "seed": args.seed, "train_limit": args.train_limit, "eval_limit": args.eval_limit,
+                "seed": args.seed, "model_seed": model_seed,
+                "train_limit": args.train_limit, "eval_limit": args.eval_limit,
                 "eval_steps": args.eval_steps, "patience": args.patience, "smoke_test": args.smoke_test,
                 "warmup_ratio": args.warmup_ratio, "skip_test": args.skip_test,
-                "random_window_offsets": args.random_window_offsets}
+                "random_window_offsets": args.random_window_offsets,
+                "attention_dropout": attention_dropout, "precision": precision,
+                "fixed_budget": fixed_budget,
+                "benchmark_sha256": getattr(args, "benchmark_sha256", None),
+                "benchmark_steps": args.benchmark_steps if fixed_budget else None}
     if continuation is not None:
         settings["continue_from"] = continuation["source"]
     settings["grow_layers"] = (continuation or {}).get("depth_growth", {}).get("target_layers")
-    if resume:
+    if args.resume:
         prior = json.loads((out / "run_config.json").read_text())
         prior.setdefault("warmup_ratio", .05)  # Compatibility with the original script.
         prior.setdefault("skip_test", False)
         prior.setdefault("random_window_offsets", False)
         prior.setdefault("grow_layers", None)
+        prior.setdefault("model_seed", prior["seed"])
+        # Historical runs did not record these fields. New runs check them.
+        for key, value in {"attention_dropout": attention_dropout if continuation else .1, "precision": precision,
+                           "fixed_budget": False, "benchmark_sha256": None,
+                           "benchmark_steps": None}.items():
+            prior.setdefault(key, value)
         if prior != settings:
             raise ValueError("Run settings or dataset differ from saved run_config.json; use a new run")
     out.mkdir(parents=True, exist_ok=True)
@@ -939,7 +989,7 @@ def training(args):
         config = GPT2Config(vocab_size=len(tokenizer), n_positions=args.block_size, n_ctx=args.block_size,
                             n_embd=args.width, n_layer=args.layers, n_head=args.heads, n_inner=4*args.width,
                             activation_function="gelu_new", resid_pdrop=args.dropout,
-                            embd_pdrop=args.dropout, attn_pdrop=.1, initializer_range=.02,
+                            embd_pdrop=args.dropout, attn_pdrop=attention_dropout, initializer_range=.02,
                             bos_token_id=tokenizer.bos_token_id, eos_token_id=tokenizer.eos_token_id,
                             pad_token_id=tokenizer.pad_token_id, tie_word_embeddings=True, use_cache=False)
         # Initial runs initialize ALL weights randomly. Continuations load only
@@ -956,7 +1006,7 @@ def training(args):
     print(f"Unique training target tokens/parameter: {report['splits']['train']['target_tokens']/parameters:.2f}. "
           "Repeated epochs do not add new language evidence.", flush=True)
     use_cuda = torch.cuda.is_available() and not args.cpu
-    bf16 = use_cuda and torch.cuda.is_bf16_supported()
+    bf16 = precision == "bf16"
 
     class SampleCallback(TrainerCallback):
         def on_step_end(self, training_args, state, control, **kwargs):
@@ -978,21 +1028,30 @@ def training(args):
         eval_strategy="steps", eval_steps=args.eval_steps, save_strategy="steps", save_steps=args.eval_steps,
         logging_steps=min(25, args.eval_steps), save_total_limit=2,
         load_best_model_at_end=True, metric_for_best_model="nll", greater_is_better=False,
-        fp16=use_cuda and not bf16, bf16=bf16, use_cpu=args.cpu,
+        fp16=precision == "fp16", bf16=bf16, use_cpu=args.cpu,
         dataloader_num_workers=0, dataloader_pin_memory=use_cuda,
-        seed=args.seed, data_seed=args.seed, report_to="none", save_safetensors=True,
+        seed=model_seed, data_seed=args.seed, report_to="none", save_safetensors=True,
         restore_callback_states_from_checkpoint=True,
     )
+    callbacks = [window_epoch_callback(train_set), SampleCallback()]
+    capacity_hook = None
+    if fixed_budget:
+        capacity_hook = capacity_callback(args, tokenizer, train_set)
+        callbacks.append(capacity_hook)
+    else:
+        callbacks.append(EarlyStoppingCallback(early_stopping_patience=args.patience,
+                                              early_stopping_threshold=.002))
     trainer = training_trainer(
         model=model, args=training_args, train_dataset=train_set, eval_dataset=val_set,
         data_collator=CausalCollator(tokenizer.pad_token_id), processing_class=tokenizer,
         preprocess_logits_for_metrics=loss_sums, compute_metrics=token_metrics,
-        callbacks=[window_epoch_callback(train_set), SampleCallback(),
-                   EarlyStoppingCallback(early_stopping_patience=args.patience, early_stopping_threshold=.002)])
-    planned_steps = args.max_steps if args.max_steps > 0 else math.ceil(len(train_set)/effective_batch)*args.epochs
+        callbacks=callbacks)
+    planned_steps = args.max_steps if args.max_steps > 0 else math.ceil(
+        math.ceil(len(train_set)/effective_batch)*args.epochs)
     if planned_steps < args.eval_steps:
         raise ValueError("Training would finish before its first evaluation; lower --eval-steps")
-    if resume and json.loads((Path(resume) / "trainer_state.json").read_text())["global_step"] >= planned_steps:
+    completed_resume = resume and json.loads((Path(resume) / "trainer_state.json").read_text())["global_step"] >= planned_steps
+    if completed_resume and not fixed_budget:
         raise ValueError("This run already reached its step budget; use generate/evaluate or start a new run")
     if continuation is not None and not resume:
         # Snapshot the starting weights before creating a fresh optimizer. The
@@ -1006,7 +1065,19 @@ def training(args):
         write_json(out / "initial_samples.json", generate_samples(model, tokenizer, PROMPTS, args.sample_tokens))
         print(f"Continuation baseline NLL: {baseline['eval_nll']:.6f}. "
               "Fresh optimizer/schedule; update numbering restarts at zero.", flush=True)
-    trainer.train(resume_from_checkpoint=resume)
+    if completed_resume:
+        # A Colab session can end after the final checkpoint but before best/
+        # and its review are written. Finalize it without one extra update.
+        from transformers.trainer_callback import TrainerState
+        trainer.state = TrainerState.load_from_json(str(Path(resume) / "trainer_state.json"))
+        if trainer.state.global_step != planned_steps:
+            raise ValueError("Saved step exceeds the planned capacity budget")
+        model.load_state_dict(GPT2LMHeadModel.from_pretrained(resume, local_files_only=True).state_dict())
+        capacity_hook.record(model, trainer.state, force=True)
+        model.load_state_dict(GPT2LMHeadModel.from_pretrained(
+            trainer.state.best_model_checkpoint, local_files_only=True).state_dict())
+    else:
+        trainer.train(resume_from_checkpoint=resume)
     # Trainer has restored the best VALIDATION checkpoint, not necessarily the last.
     if continuation is not None:
         continuation["best_new_validation_nll"] = trainer.state.best_metric
@@ -1032,12 +1103,24 @@ def training(args):
                "best_validation_nll": trainer.state.best_metric, "global_step": trainer.state.global_step,
                "dataset_sha256": signature, "smoke_test": args.smoke_test,
                "limited_data": bool(args.train_limit or args.eval_limit), "test": metrics,
-               "corpus": report, "run": settings, "continuation": continuation}
+               "corpus": report, "run": settings, "continuation": continuation,
+               "runtime": {"torch": str(torch.__version__), "device": str(trainer.args.device),
+                           "precision": precision,
+                           "gpu": torch.cuda.get_device_name() if use_cuda else None}}
     write_json(best / "training_summary.json", summary)
     if not args.skip_test:
         write_json(out / "test_metrics.json", metrics)
     final_samples = generate_samples(model, tokenizer, PROMPTS, args.sample_tokens)
     write_json(best / "samples.json", final_samples)
+    if fixed_budget:
+        summary["optimizer_skipped_steps"] = capacity_hook.skipped_count(trainer.state.global_step)
+        summary["applied_optimizer_updates"] = trainer.state.global_step-summary["optimizer_skipped_steps"]
+        summary["training_exposure"] = training_exposure(train_set, effective_batch,
+                                                         trainer.state.global_step, args.seed)
+        summary["best_validation_step"] = int(Path(trainer.state.best_model_checkpoint).name.split("-")[-1])
+        write_json(best / "training_summary.json", summary)
+        run_capacity_review(model, tokenizer, args.capacity_benchmark, train_set,
+                            best, summary["best_validation_step"], summary["best_validation_nll"])
     (best / "README.md").write_text(model_card(summary), encoding="utf-8")
     print(f"Best model and tokenizer: {best}", flush=True)
     print("Test evaluation skipped for model development." if args.skip_test else
@@ -1172,6 +1255,473 @@ def compare_training_variants(args, kind):
                 print(f"{name.upper()} / {sample['mode'].upper()}: {sample['continuation']}\n")
     print(f"Read both sets of passages in {out / 'comparison.json'}. "
           "Loss improvement alone is not evidence of coherent generation.")
+    return results
+
+
+def resolve_precision(requested, cpu=False):
+    import torch
+    cuda = torch.cuda.is_available() and not cpu
+    if requested == "auto":
+        return ("bf16" if torch.cuda.is_bf16_supported() else "fp16") if cuda else "fp32"
+    if requested in {"fp16", "bf16"} and not cuda:
+        raise ValueError("fp16/bf16 training requires CUDA; use auto or fp32 on CPU/MPS")
+    if requested == "bf16" and not torch.cuda.is_bf16_supported():
+        raise ValueError("This CUDA device does not support bf16")
+    return requested
+
+
+def json_digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def atomic_json(path, value):
+    """A completion record must never be a partially written JSON file."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    write_json(temporary, value)
+    temporary.replace(path)
+
+
+def training_exposure(dataset, effective_batch, steps, seed):
+    """Exact target count, including short book tails and a partial last update."""
+    import torch
+    lengths = [min(dataset.block_size, len(dataset.books[book])-start)-1
+               for book, start in dataset.windows]
+    per_epoch = math.ceil(len(lengths)/effective_batch)
+    epochs, remainder = divmod(steps, per_epoch)
+    generator = torch.Generator().manual_seed(seed+epochs)
+    order = torch.randperm(len(lengths), generator=generator).tolist()
+    partial = order[:remainder*effective_batch]
+    return {"steps": steps, "updates_per_epoch": per_epoch, "complete_epochs": epochs,
+            "examples": epochs*len(lengths)+len(partial),
+            "scored_targets": epochs*sum(lengths)+sum(lengths[i] for i in partial),
+            "targets_per_complete_epoch": sum(lengths)}
+
+
+def make_capacity_benchmark(data, tokenizer, signature, count=20, seed=42,
+                            prefix_min=64, prefix_max=160, generation_tokens=192):
+    """Freeze book-balanced validation prompts at paragraph/sentence boundaries.
+
+    Decode/re-encode the complete book only to locate character boundaries.
+    Require an exact token round trip, then retain the original token slices.
+    References are stored for review only and never passed to generation.
+    """
+    from bisect import bisect_left, bisect_right
+    rng = random.Random(seed)
+    candidates = {}
+    dataset = BookWindows(Path(data) / "validation.jsonl", 512)
+    for book_id, book in zip(dataset.book_ids, dataset.books):
+        original = book[1:-1].tolist()  # Prepared books have one boundary EOS at either end.
+        text = tokenizer.decode(original, clean_up_tokenization_spaces=False)
+        encoded = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True, verbose=False)
+        if encoded["input_ids"] != original:
+            raise ValueError(f"Cannot locate exact token boundaries in validation book {book_id}")
+        starts, ends = zip(*encoded["offset_mapping"])
+        sentence_ends = [match.end() for match in re.finditer(r"""[.!?]["'”’)]*(?=\s|$)""", text)]
+        paragraphs = [0] + [match.end() for match in re.finditer(r"\n[ \t]*\n+", text)]
+        choices = []
+        for begin in paragraphs:
+            while begin < len(text) and text[begin].isspace():
+                begin += 1
+            start = bisect_left(starts, begin)
+            # Avoid front/back matter and near-end passages without a reference.
+            if not len(original)*.05 <= start < len(original)*.9 or starts[start] != begin:
+                continue
+            minimum = start+prefix_min
+            maximum = min(start+prefix_max, len(original)-generation_tokens)
+            if minimum > maximum:
+                continue
+            first = bisect_left(sentence_ends, ends[minimum-1])
+            last = bisect_right(sentence_ends, ends[maximum-1])
+            options = []
+            for boundary in sentence_ends[first:last]:
+                end = bisect_right(ends, boundary)
+                if prefix_min <= end-start <= prefix_max and ends[end-1] == boundary:
+                    options.append(end)
+            if not options:
+                continue
+            end = min(options, key=lambda x: abs(x-start-(prefix_min+prefix_max)//2))
+            ids = original[start:end]
+            choices.append({"book_id": book_id, "start_token": start+1,
+                            "prefix_tokens": len(ids), "input_ids": ids,
+                            "prompt": tokenizer.decode(ids, clean_up_tokenization_spaces=False),
+                            "reference_ids": original[end:end+generation_tokens],
+                            "reference_continuation": tokenizer.decode(original[end:end+generation_tokens])})
+        rng.shuffle(choices)
+        candidates[book_id] = choices
+    order = sorted(candidates)
+    rng.shuffle(order)
+    prompts = []
+    # Round robin prevents the longest books from dominating this qualitative panel.
+    while len(prompts) < count:
+        added = False
+        for book_id in order:
+            if candidates[book_id] and len(prompts) < count:
+                prompt = candidates[book_id].pop()
+                prompt["prompt_id"] = f"p{len(prompts):02d}"
+                prompts.append(prompt)
+                added = True
+        if not added:
+            raise ValueError(f"Only {len(prompts)} eligible validation passages; requested {count}")
+    return {"version": 1, "dataset_sha256": signature, "selection_seed": seed,
+            "split": "validation", "prompts": prompts, "sampling_seeds": [seed, seed+1],
+            "generation_tokens": generation_tokens, "training_eval_windows": 1024,
+            "decoding": {"temperature": .8, "top_p": .92, "top_k": 40, "repetition_penalty": 1.08,
+                         "no_repeat_ngram_size": 0},
+            "interpretation": "Frozen before either model trains. Original validation text only. "
+            "Read outputs for grammar, character/scene continuity, event progression, and repetition. "
+            "An alternative continuation need not match the reference. No automatic coherence score."}
+
+
+def copied_training_spans(generations, dataset, minimum=32):
+    """Find the longest exact training-token span >= minimum, excluding prompts.
+
+    Query-only rolling-hash index: memory scales with generated text, not the
+    six-million-token corpus. Every hash match is verified against actual IDs.
+    Shorter matches and matches with different token boundaries are not detected.
+    This is an overlap diagnostic, not a novelty or coherence verdict.
+    """
+    base, mask = 1000003, (1 << 64)-1
+    power = pow(base, minimum-1, 1 << 64)
+
+    def hashes(tokens):
+        if len(tokens) < minimum:
+            return
+        value = 0
+        for token in tokens[:minimum]:
+            value = (value*base+int(token)+1) & mask
+        yield 0, value
+        for end in range(minimum, len(tokens)):
+            value = (((value-(int(tokens[end-minimum])+1)*power) & mask)*base+int(tokens[end])+1) & mask
+            yield end-minimum+1, value
+
+    queries = defaultdict(list)
+    results = [{"matched_tokens": 0, "book_id": None, "training_start_token": None,
+                "generated_start_token": None} for _ in generations]
+    for index, tokens in enumerate(generations):
+        for start, value in hashes(tokens):
+            queries[value].append((index, start))
+    if not queries:
+        return results
+    for book_id, book in zip(dataset.book_ids, dataset.books):
+        for start, value in hashes(book):
+            for index, generated_start in queries.get(value, ()):
+                tokens = generations[index]
+                if book[start:start+minimum].tolist() != tokens[generated_start:generated_start+minimum]:
+                    continue
+                left, right = 0, minimum
+                while left < min(start, generated_start) and book[start-left-1] == tokens[generated_start-left-1]:
+                    left += 1
+                while start+right < len(book) and generated_start+right < len(tokens) and book[start+right] == tokens[generated_start+right]:
+                    right += 1
+                if left+right > results[index]["matched_tokens"]:
+                    results[index] = {"matched_tokens": left+right, "book_id": book_id,
+                                      "training_start_token": start-left,
+                                      "generated_start_token": generated_start-left}
+    return results
+
+
+def write_coherence_sheet(path, records):
+    import csv
+    path = Path(path)
+    temporary = path.with_name(path.name + ".tmp")
+    fields = ["sample_id", "prompt", "continuation", "generated_tokens", "ended_with_eos",
+              "longest_training_copy_tokens", "grammar_0_2", "continuity_0_2",
+              "event_progression_0_2", "nonrepetition_0_2", "notes"]
+    with temporary.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for record in records:
+            writer.writerow({field: record.get(field, "") for field in fields})
+    temporary.replace(path)
+
+
+def score_training_subset(model, tokenizer, dataset, limit=1024, batch_size=8):
+    """Fixed training-window NLL with dropout off, without changing the training iterator."""
+    import copy
+
+    import numpy as np
+    import torch
+    fixed = copy.copy(dataset)
+    indices = np.linspace(0, len(dataset)-1, min(limit, len(dataset)), dtype=int)
+    fixed.windows = [dataset.windows[i] for i in indices]
+    fixed.random_offsets = False
+    fixed.set_training_epoch(0)
+    collator = CausalCollator(tokenizer.pad_token_id)
+    total, targets = 0., 0
+    was_training = model.training
+    model.eval()
+    try:
+        with torch.inference_mode():
+            for start in range(0, len(fixed), batch_size):
+                batch = {k: v.to(model.device) for k, v in
+                         collator([fixed[i] for i in range(start, min(start+batch_size, len(fixed)))]).items()}
+                logits = model(batch["input_ids"], attention_mask=batch["attention_mask"], use_cache=False).logits
+                values = loss_sums(logits, batch["labels"]).cpu().double().sum(dim=0)
+                total += float(values[0])
+                targets += int(values[1])
+    finally:
+        model.train(was_training)
+    return {"nll": total/targets, "scored_tokens": targets, "windows": len(fixed), "dropout_disabled": True}
+
+
+def run_capacity_review(model, tokenizer, benchmark, training_data, destination, step, nll):
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    results, generated_ids = [], []
+    start = time.monotonic()
+    training_score = score_training_subset(model, tokenizer, training_data,
+                                          benchmark.get("training_eval_windows", 1024))
+    for prompt in benchmark["prompts"]:
+        for seed in benchmark["sampling_seeds"]:
+            sample, = generate_samples(model, tokenizer, [prompt], benchmark["generation_tokens"], seed,
+                                       modes=("sample",), include_token_ids=True)
+            ids = [token for token in sample["token_ids"]
+                   if token not in {tokenizer.eos_token_id, tokenizer.pad_token_id}]
+            generated_ids.append(ids)
+            results.append({"sample_id": f"{prompt['prompt_id']}-s{seed}", "prompt_id": prompt["prompt_id"],
+                            "book_id": prompt["book_id"], "seed": seed, **sample,
+                            "generated_tokens": len(ids),
+                            "ended_with_eos": bool(sample["token_ids"] and sample["token_ids"][-1] == tokenizer.eos_token_id),
+                            **repetition_counts(ids)})
+    for result, match in zip(results, copied_training_spans(generated_ids, training_data)):
+        result["training_copy"] = match
+        result["longest_training_copy_tokens"] = match["matched_tokens"]
+    report = {"step": step, "validation_nll": nll, "benchmark_sha256": json_digest(benchmark),
+              "test_evaluated": False, "fixed_training_subset": training_score,
+              "samples": results, "runtime_seconds": time.monotonic()-start,
+              "copy_search": "Exact generated-only token spans >=32, searched within training books. "
+              "Zero means no match detected by this rule, not proof of originality.",
+              "review_rubric": {"0": "clear failure", "1": "mixed or uncertain", "2": "sustained success"},
+              "acceptance": "Manual review required; loss, low repetition, and copying are not coherence scores."}
+    write_coherence_sheet(destination / "review.csv", results)
+    atomic_json(destination / "coherence.json", report)  # Completion marker written last.
+    print(f"\n[coherence | step {step}] {len(results)} continuations: {destination / 'coherence.json'}", flush=True)
+    for result in results[:2]:
+        print(f"[seed {result['seed']}] {result['prompt']}{result['continuation']}\n", flush=True)
+    return report
+
+
+def capacity_callback(args, tokenizer, training_data):
+    from transformers import TrainerCallback
+    out = Path(args.output_dir)
+    skip_path = out / "optimizer_skips.json"
+
+    class CapacityCallback(TrainerCallback):
+        def skipped_count(self, step):
+            return len([s for s in json.loads(skip_path.read_text()) if s <= step]) if skip_path.exists() else 0
+
+        def record(self, model, state, force=False):
+            due = state.global_step % args.benchmark_steps == 0 or state.global_step == state.max_steps
+            if not due or state.global_step == 0:
+                return
+            destination = out / "reviews" / f"step-{state.global_step}"
+            if not force and (destination / "coherence.json").exists():
+                return
+            model.save_pretrained(destination / "model", safe_serialization=True)
+            tokenizer.save_pretrained(destination / "model")
+            nll = next((row["eval_nll"] for row in reversed(state.log_history)
+                        if row.get("step") == state.global_step and "eval_nll" in row), None)
+            atomic_json(destination / "model" / "training_summary.json", {
+                "dataset_sha256": args.capacity_benchmark["dataset_sha256"], "global_step": state.global_step,
+                "validation_nll": nll, "parameters": model.num_parameters(), "test": {},
+                "initialization": "random", "benchmark_sha256": args.benchmark_sha256})
+            run_capacity_review(model, tokenizer, args.capacity_benchmark, training_data,
+                                destination, state.global_step, nll)
+
+        def on_train_begin(self, training_args, state, control, **kwargs):
+            prior = json.loads(skip_path.read_text()) if skip_path.exists() else []
+            atomic_json(skip_path, [s for s in prior if s <= state.global_step])
+            # Recover a checkpoint saved immediately before a review was interrupted.
+            self.record(kwargs["model"], state)
+
+        def on_step_end(self, training_args, state, control, **kwargs):
+            if getattr(kwargs["optimizer"], "step_was_skipped", False):
+                prior = json.loads(skip_path.read_text()) if skip_path.exists() else []
+                atomic_json(skip_path, sorted(set(prior+[state.global_step])))
+            if state.global_step % args.benchmark_steps == 0 or state.global_step == state.max_steps:
+                # Include the final partial interval in evaluation and persistence.
+                control.should_evaluate = control.should_save = True
+            return control
+
+        def on_save(self, training_args, state, control, **kwargs):
+            self.record(kwargs["model"], state, force=True)
+
+    return CapacityCallback()
+
+
+def compare_capacity(args):
+    """Fresh architectures; fixed target exposure; resumable optimizers; frozen prose review."""
+    import gc
+    import os
+
+    import torch
+    from transformers import AutoTokenizer, GPT2Config, GPT2LMHeadModel
+    if int(os.environ.get("WORLD_SIZE", "1")) != 1:
+        raise ValueError("This comparison supports one training process/device so batch accounting stays exact")
+    if not args.cpu and not args.smoke_test and torch.cuda.is_available() and torch.cuda.device_count() != 1:
+        raise ValueError("Expose one CUDA device (CUDA_VISIBLE_DEVICES) for this matched-batch experiment")
+    if args.continue_from or args.grow_layers or args.corpus or args.rebuild:
+        raise ValueError("Capacity comparison starts fresh on the original source list; no continuation/subset/rebuild")
+    if args.resume not in {None, "latest"}:
+        raise ValueError("Use --resume without a checkpoint path to resume the paired experiment")
+    if args.train_limit or args.eval_limit:
+        raise ValueError("Use --smoke-test for a limited check; the real comparison uses the complete splits")
+    if (args.block_size != 512 or args.vocab_size != 8192
+            or args.batch_size*args.accumulation != 32 or args.min_success_rate != 1):
+        raise ValueError("Capacity comparison requires context 512, vocab 8192, effective batch 32, and all sources")
+    if not args.random_window_offsets:
+        raise ValueError("Capacity comparison requires the agreed shifted training windows")
+    out = Path(args.output_dir)
+    if out.exists() and any(out.iterdir()) and not args.resume:
+        raise ValueError("Use a new output directory or --resume (also after --plan-only)")
+    if args.resume and not (out / "experiment.json").exists():
+        raise ValueError("No saved experiment plan to resume")
+    prepare(args)
+    data = Path(args.data_dir)
+    signature = dataset_signature(data)
+    manifest = json.loads((data / "manifest.json").read_text())
+    if any(book["url"] not in sources for book in manifest):
+        raise ValueError("Data contain sources outside the approved Christmas corpus")
+    tokenizer = AutoTokenizer.from_pretrained(data / "tokenizer", local_files_only=True)
+    if len(tokenizer) != 8192:
+        raise ValueError("The paired architectures require the existing 8192-token vocabulary")
+    variants = [("14m", 6, 384, 6), ("42m", 12, 512, 8)]
+    prefix_min, prefix_max = 64, 160
+    if args.smoke_test:
+        variants = [("tiny-control", 2, 64, 2), ("tiny-larger", 3, 96, 3)]
+        args.cpu, args.precision, args.block_size = True, "fp32", 128
+        args.batch_size, args.accumulation, args.max_steps = 2, 1, 3
+        args.train_limit, args.eval_limit, args.eval_steps = 16, 8, 2
+        args.sample_steps, args.sample_tokens = 3, 12
+        args.benchmark_steps, args.benchmark_prompts, args.benchmark_tokens = 2, 2, 12
+        prefix_min, prefix_max = 8, 48
+    args.precision = resolve_precision(args.precision, args.cpu)
+    args.fixed_budget, args.skip_test = True, True
+    training_data = BookWindows(data / "train.jsonl", args.block_size, args.train_limit,
+                                random_offsets=True, seed=args.seed)
+    effective_batch = args.batch_size*args.accumulation
+    steps = args.max_steps if args.max_steps > 0 else math.ceil(
+        math.ceil(len(training_data)/effective_batch)*args.epochs)
+    if steps < args.eval_steps:
+        raise ValueError("Budget is shorter than --eval-steps; lower the evaluation interval")
+    benchmark = make_capacity_benchmark(data, tokenizer, signature, args.benchmark_prompts, args.seed,
+                                       prefix_min, prefix_max, args.benchmark_tokens)
+    benchmark_hash = json_digest(benchmark)
+    architectures = []
+    for name, layers, width, heads in variants:
+        with torch.device("meta"):
+            parameter_count = GPT2LMHeadModel(GPT2Config(
+                vocab_size=len(tokenizer), n_positions=args.block_size, n_ctx=args.block_size,
+                n_layer=layers, n_embd=width, n_head=heads, n_inner=4*width)).num_parameters()
+        architectures.append({"name": name, "layers": layers, "width": width, "heads": heads,
+                              "parameters": parameter_count})
+    shared = {key: getattr(args, key) for key in (
+        "seed", "model_seed", "block_size", "dropout", "attention_dropout", "batch_size", "accumulation",
+        "learning_rate", "warmup_ratio", "epochs", "max_steps", "eval_steps", "sample_steps",
+        "sample_tokens", "benchmark_steps", "precision", "smoke_test", "train_limit", "eval_limit")}
+    plan = {"version": 1, "dataset_sha256": signature, "benchmark_sha256": benchmark_hash,
+            "architectures": architectures, "shared": shared, "initialization": "random for both branches",
+            "planned_exposure_per_branch": training_exposure(training_data, effective_batch, steps, args.seed),
+            "warmup_updates": math.ceil(steps*args.warmup_ratio),
+            "final_learning_rate": args.learning_rate*.1, "test_evaluated": False,
+            "matched_compute": False, "early_stopping": False,
+            "rationale": {
+                "architecture": "Compare 6x384 with 12x512; both use 64-dimensional attention heads, 4x MLPs, "
+                "tied embeddings, and GPT-2's residual-projection initialization. Fresh weights, no depth growth.",
+                "corpus": "Same prepared books, overlap-group splits, train-only BPE, shuffling, and epoch offsets. "
+                "No additional text, synthetic stories, changed sampling weights, or chapter rewriting.",
+                "regularization": "0.05 dropout in embedding, residual, and attention paths by default; AdamW "
+                "weight decay 0.1, excluding bias/norm parameters through Trainer. Experimental, not proven optimal.",
+                "optimization": "Same AdamW (0.9,0.95), epsilon 1e-8, gradient clip 1.0; default peak LR 3e-4. "
+                "One warmup/cosine schedule ending at 10% of peak; no optimizer restarts between epochs.",
+                "budget": "40 epochs by default. Early stopping disabled to keep exposures matched. "
+                "Change the budget before starting both branches. Repetition is not additional unique evidence.",
+                "precision": "BF16 on supported CUDA GPUs, otherwise CUDA FP16 with scaling; FP32 on CPU/MPS. "
+                "AMP skipped steps are reported. Exact bitwise replay across hardware/software is not promised.",
+                "selection": "Retain best validation NLL and periodic review weights. Human coherence review "
+                "is required; there is no automatic semantic winner. Larger model costs more per update."}}
+    if args.smoke_test:
+        plan["rationale"]["architecture"] = (
+            "Two distinct tiny architectures, 2x64 and 3x96, with 32-dimensional heads. "
+            "Execution verification only; this is not the real 14M/42M comparison.")
+    if args.resume:
+        if json.loads((out / "experiment.json").read_text()) != plan:
+            raise ValueError("Saved experiment settings/data differ; restore them or use a new output directory")
+        if json.loads((out / "benchmark.json").read_text()) != benchmark:
+            raise ValueError("Frozen benchmark differs; refusing to change the evaluation panel on resume")
+    else:
+        atomic_json(out / "benchmark.json", benchmark)
+        atomic_json(out / "experiment.json", plan)
+    print("\nCAPACITY PLAN (fresh models; matched examples/targets; different compute):", flush=True)
+    print(json.dumps({key: value for key, value in plan.items() if key != "rationale"}, indent=2), flush=True)
+    if args.plan_only:
+        print(f"Plan and frozen prompts: {out}. Add --resume to start this saved plan.", flush=True)
+        return plan
+    results = {}
+    for architecture in architectures:
+        name = architecture["name"]
+        branch = argparse.Namespace(**vars(args))
+        branch.command, branch.output_dir = "train", str(out / name)
+        branch.layers, branch.width, branch.heads = (architecture[k] for k in ("layers", "width", "heads"))
+        branch.capacity_benchmark, branch.benchmark_sha256 = benchmark, benchmark_hash
+        branch.resume = "latest" if args.resume and (Path(branch.output_dir) / "run_config.json").exists() else None
+        best = Path(branch.output_dir) / "best"
+        complete = best / "training_summary.json"
+        if args.resume and complete.exists() and (best / "coherence.json").exists():
+            summary = json.loads(complete.read_text())
+            if (summary["dataset_sha256"] != signature or summary["global_step"] != steps
+                    or summary["parameters"] != architecture["parameters"]
+                    or summary["run"].get("benchmark_sha256") != benchmark_hash):
+                raise ValueError(f"Completed branch metadata do not match the plan: {name}")
+            print(f"Reusing completed branch {name}; optimizer will not restart.", flush=True)
+        else:
+            summary = training(branch)
+        results[name] = {"parameters": summary["parameters"], "global_step": summary["global_step"],
+                         "best_validation_nll": summary["best_validation_nll"],
+                         "best_validation_step": summary["best_validation_step"],
+                         "training_exposure": summary["training_exposure"],
+                         "optimizer_skipped_steps": summary["optimizer_skipped_steps"],
+                         "applied_optimizer_updates": summary["applied_optimizer_updates"],
+                         "best_model": str(best), "coherence_report": str(best / "coherence.json"),
+                         "final_review": str(Path(branch.output_dir) / "reviews" / f"step-{steps}")}
+        atomic_json(out / "comparison.json", {
+            "complete": len(results) == len(architectures), "benchmark_sha256": benchmark_hash,
+            "test_evaluated": False, "matched_compute": False, "branches": results,
+            "selected_checkpoints_may_differ_in_step": True,
+            "coherence_winner": None, "interpretation": "Review prose; lower NLL is not a coherence verdict."})
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+    if len({json_digest(result["training_exposure"]) for result in results.values()}) != 1:
+        raise RuntimeError("Branch target exposure differs; comparison is invalid")
+    # Mixed, opaque IDs allow manual review without seeing the architecture label.
+    panels, key = {"best": [], "final": []}, {}
+    for name, result in results.items():
+        for selection, report_path, checkpoint in (
+                ("best", Path(result["coherence_report"]), result["best_model"]),
+                ("final", Path(result["final_review"]) / "coherence.json",
+                 str(Path(result["final_review"]) / "model"))):
+            for sample in json.loads(report_path.read_text())["samples"]:
+                sample_id = hashlib.sha256(
+                    f"{benchmark_hash}:{name}:{selection}:{sample['sample_id']}".encode()).hexdigest()[:16]
+                panels[selection].append({**sample, "sample_id": sample_id})
+                key[sample_id] = {"branch": name, "selection": selection,
+                                  "sample_id": sample["sample_id"], "checkpoint": checkpoint}
+    rng = random.Random(args.seed)
+    for selection, filename in (("best", "blind_review.csv"), ("final", "blind_final_review.csv")):
+        rng.shuffle(panels[selection])
+        if not (args.resume and (out / filename).exists()):
+            write_coherence_sheet(out / filename, panels[selection])
+    atomic_json(out / "review_key.json", key)
+    print("\nCOMPLETED CAPACITY COMPARISON:", flush=True)
+    print(json.dumps(results, indent=2), flush=True)
+    print(f"Read/rate {out / 'blind_review.csv'} (best NLL) and blind_final_review.csv (same final step); "
+          "decode branch names with review_key.json afterward. "
+          "The test set remains reserved. Smoke runs validate execution only.", flush=True)
     return results
 
 
@@ -1421,30 +1971,35 @@ def inference(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["prepare", "train", "compare-dropout", "compare-windowing", "compare-depth", "diagnose",
+    parser.add_argument("command", choices=["prepare", "train", "compare-capacity", "compare-dropout", "compare-windowing", "compare-depth", "diagnose",
                                             "compare-decoding", "evaluate", "generate"])
     parser.add_argument("--corpus", help="Optional subset of the embedded Christmas URLs, as a Python sources list")
     parser.add_argument("--data-dir", default=str(ROOT / "data"))
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--model-seed", type=int,
+                        help="Initialization/dropout seed; defaults to --seed. Change only this for a new seed replicate")
     parser.add_argument("--vocab-size", type=int, default=8192)
     parser.add_argument("--rebuild", action="store_true")
     parser.add_argument("--offline", action="store_true", help="Require cached Gutenberg downloads")
-    parser.add_argument("--min-success-rate", type=float, default=.9)
-    parser.add_argument("--output-dir", default=str(ROOT / "runs" / "christmas"))
+    parser.add_argument("--min-success-rate", type=float, default=None)
+    parser.add_argument("--output-dir")
     parser.add_argument("--model-dir", help="Saved project model; required for diagnose/compare-decoding")
     parser.add_argument("--layers", type=int, default=6)
     parser.add_argument("--width", type=int, default=384)
     parser.add_argument("--heads", type=int, default=6)
     parser.add_argument("--block-size", type=int, default=512)
-    parser.add_argument("--dropout", type=float, default=.15)
+    parser.add_argument("--dropout", type=float, default=None)
+    parser.add_argument("--attention-dropout", type=float, default=None,
+                        help="Attention dropout for fresh models (capacity: 0.05; train: 0.1)")
+    parser.add_argument("--precision", choices=["auto", "fp32", "fp16", "bf16"], default="auto")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--accumulation", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
-    parser.add_argument("--warmup-ratio", type=float, default=.05)
-    parser.add_argument("--epochs", type=float, default=12)
+    parser.add_argument("--warmup-ratio", type=float, default=None)
+    parser.add_argument("--epochs", type=float, default=None, help="Capacity comparison: 40; ordinary train: 12")
     parser.add_argument("--max-steps", type=int, default=-1, help="Optional optimizer-step cap")
     parser.add_argument("--eval-steps", type=int, default=250)
-    parser.add_argument("--sample-steps", type=int, default=250)
+    parser.add_argument("--sample-steps", type=int, default=None)
     parser.add_argument("--sample-tokens", type=int, default=96)
     parser.add_argument("--patience", type=int, default=6, help="Validation checks without a meaningful improvement")
     restart = parser.add_mutually_exclusive_group()
@@ -1458,8 +2013,16 @@ def main(argv=None):
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--smoke-test", action="store_true", help="Tiny CPU model, 3 updates, limited data; not quality training")
     parser.add_argument("--train-limit", type=int, help="Diagnostic window cap; omitted for full training")
-    parser.add_argument("--random-window-offsets", action="store_true",
+    parser.add_argument("--random-window-offsets", action="store_true", default=None,
                         help="Shift interior training windows per book/epoch; keep evaluation fixed")
+    parser.add_argument("--benchmark-steps", type=int, default=2000,
+                        help="Capacity comparison: save weights and run the full coherence panel at this interval")
+    parser.add_argument("--benchmark-prompts", type=int, default=20,
+                        help="Capacity comparison: frozen, book-balanced validation prefixes")
+    parser.add_argument("--benchmark-tokens", type=int, default=192,
+                        help="Capacity comparison: maximum generated tokens per prefix/seed")
+    parser.add_argument("--plan-only", action="store_true",
+                        help="Capacity comparison: freeze data/benchmark/settings and print the budget without training")
     parser.add_argument("--eval-limit", type=int, help="Diagnostic window cap; omitted for full evaluation")
     parser.add_argument("--diagnostic-windows", type=int, default=1024,
                         help="Maximum windows per train/validation split for diagnose")
@@ -1468,10 +2031,30 @@ def main(argv=None):
                         choices=["both", "greedy", "sample", "blocked_sample", "contrastive"],
                         help="Decoding method for generate; both preserves the original greedy/sample output")
     args = parser.parse_args(argv)
+    capacity = args.command == "compare-capacity"
+    defaults = {"min_success_rate": (1., .9), "dropout": (.05, .15),
+                "attention_dropout": (.05, .1), "warmup_ratio": (.02, .05),
+                "epochs": (40., 12.), "sample_steps": (500, 250),
+                "random_window_offsets": (True, False),
+                "output_dir": (str(ROOT / "runs" / "christmas-capacity"), str(ROOT / "runs" / "christmas"))}
+    for name, values in defaults.items():
+        if getattr(args, name) is None:
+            setattr(args, name, values[0 if capacity else 1])
+    if args.model_seed is None:
+        args.model_seed = args.seed
+    if not all(0 <= seed < 2**32 for seed in (args.seed, args.model_seed)):
+        parser.error("Data and model seeds must be integers in [0, 2**32)")
+    if args.plan_only and not capacity:
+        parser.error("--plan-only is for compare-capacity")
+    if capacity and (args.layers, args.width, args.heads) != (6, 384, 6):
+        parser.error("compare-capacity fixes both architectures; do not override --layers/--width/--heads")
+    if capacity and (min(args.benchmark_steps, args.benchmark_prompts, args.benchmark_tokens) <= 0
+                     or args.benchmark_tokens+160 > args.block_size):
+        parser.error("Capacity benchmark counts must be positive and generation tokens + 160 must fit the context")
     if args.heads <= 0 or args.width % args.heads or args.block_size < 8 or args.vocab_size < 258:
         parser.error("width must divide by heads; block-size >= 8; vocab-size >= 258")
-    if not 0 < args.min_success_rate <= 1 or not 0 <= args.dropout < 1:
-        parser.error("min-success-rate must be in (0,1]; dropout in [0,1)")
+    if not 0 < args.min_success_rate <= 1 or not 0 <= args.dropout < 1 or not 0 <= args.attention_dropout < 1:
+        parser.error("min-success-rate must be in (0,1]; both dropout rates in [0,1)")
     if not 0 <= args.warmup_ratio < 1:
         parser.error("warmup-ratio must be in [0,1)")
     if args.continuation_dropout is not None and (
@@ -1496,6 +2079,8 @@ def main(argv=None):
         prepare(args)
     elif args.command == "train":
         training(args)
+    elif args.command == "compare-capacity":
+        compare_capacity(args)
     elif args.command == "compare-dropout":
         compare_dropout(args)
     elif args.command == "compare-windowing":
