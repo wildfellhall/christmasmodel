@@ -29,6 +29,8 @@ from model import (
     set_continuation_dropout,
     split_groups,
     token_metrics,
+    training_trainer,
+    window_epoch_callback,
 )
 
 
@@ -117,6 +119,74 @@ def test_windows_score_every_target_once_and_never_join_books(tmp_path):
     batch = CausalCollator(1)([dataset[0], {"input_ids": [0, 7, 0]}])
     assert batch["labels"][1].tolist() == [-100, 7, 0, -100]
     assert batch["attention_mask"][1].tolist() == [1, 1, 1, 0]
+
+
+def test_shifted_windows_preserve_books_lengths_edges_and_rng(tmp_path):
+    path = tmp_path / "tokens.jsonl"
+    books = [[0] + list(range(2, 98)) + [0], [0] + list(range(102, 168)) + [0], [0, 200, 201, 0]]
+    path.write_text("\n".join(json.dumps({"id": i, "ids": ids}) for i, ids in enumerate(books)))
+    fixed = BookWindows(path, 16)
+    shifted = BookWindows(path, 16, random_offsets=True, seed=42)
+    rng = random.getstate()
+    torch_rng = torch.get_rng_state().clone()
+    first = [row["input_ids"] for row in shifted]
+    shifted.set_training_epoch(1)
+    second = [row["input_ids"] for row in shifted]
+    assert first != second
+    assert random.getstate() == rng and torch.equal(torch_rng, torch.get_rng_state())
+    assert len(fixed) == len(shifted)
+    for epoch in range(4):
+        shifted.set_training_epoch(epoch)
+        for index, (book, original_start) in enumerate(fixed.windows):
+            reference = fixed[index]["input_ids"]
+            actual = shifted[index]["input_ids"]
+            assert len(actual) == len(reference)
+            assert actual.count(0) == reference.count(0)
+            assert any(books[book][start:start+len(actual)] == actual for start in range(len(books[book])))
+            if original_start == 0 or original_start+16 >= len(books[book]):
+                assert actual == reference
+    recreated = BookWindows(path, 16, random_offsets=True, seed=42)
+    recreated.set_training_epoch(1)
+    assert [row["input_ids"] for row in recreated] == second
+    fixed.set_training_epoch(10)
+    assert [row for row in fixed] == [row for row in BookWindows(path, 16)]
+
+
+@pytest.mark.parametrize("random_offsets", [False, True])
+def test_training_resume_after_epoch_boundary_matches_uninterrupted(tiny_model, tmp_path, random_offsets):
+    from accelerate.data_loader import SeedableRandomSampler
+    from transformers import TrainingArguments
+    template, tokenizer = tiny_model
+    path = tmp_path / "tokens.jsonl"
+    path.write_text(json.dumps({"id": "46", "ids": [0] + list(range(2, 62))*3 + [0]}))
+    initial = {key: value.clone() for key, value in template.state_dict().items()}
+    def run(output, resume=None):
+        model = GPT2LMHeadModel(template.config)
+        model.load_state_dict(initial)
+        dataset = BookWindows(path, 16, random_offsets=random_offsets, seed=42)
+        batches = []
+        def record(module, args, kwargs):
+            batches.append((dataset.epoch, kwargs["input_ids"].tolist()))
+        model.register_forward_pre_hook(record, with_kwargs=True)
+        trainer = training_trainer(model=model, args=TrainingArguments(
+            output_dir=str(output), max_steps=12, per_device_train_batch_size=2,
+            learning_rate=3e-4, save_steps=9, save_total_limit=2, logging_strategy="no",
+            use_cpu=True, report_to="none", disable_tqdm=True, seed=123, data_seed=123),
+            train_dataset=dataset, data_collator=CausalCollator(tokenizer.pad_token_id),
+            callbacks=[window_epoch_callback(dataset)])
+        reference_sampler = SeedableRandomSampler(dataset, data_seed=123)
+        for epoch in (0, 1, 2):
+            dataset.set_training_epoch(epoch)
+            reference_sampler.set_epoch(epoch)
+            assert list(trainer._get_train_sampler()) == list(reference_sampler)
+        dataset.set_training_epoch(0)
+        trainer.train(resume_from_checkpoint=str(resume) if resume else None)
+        return model, batches
+    full, full_batches = run(tmp_path / "full")
+    resumed, resumed_batches = run(tmp_path / "resumed", tmp_path / "full" / "checkpoint-9")
+    assert len(full_batches) == 12 and full_batches[7][0] == 1
+    assert resumed_batches == full_batches[9:]
+    assert all(torch.equal(value, resumed.state_dict()[key]) for key, value in full.state_dict().items())
 
 
 def test_perplexity_is_token_weighted_and_ignores_padding():

@@ -502,15 +502,17 @@ def prepare(args):
 
 
 class BookWindows:
-    """One-token overlap preserves every next-token target, including book tails.
+    """Fixed windows score every next-token target once, including book tails.
 
     Windows never cross books. Real EOS labels stay supervised; only padding is
-    -100. No random-window split, and no synthetic next-book transitions.
+    -100. Optional training offsets move interior windows each epoch, keeping
+    row lengths and edge windows fixed; then coverage is sampled, not exhaustive.
     """
-    def __init__(self, path, block_size, limit=None):
+    def __init__(self, path, block_size, limit=None, random_offsets=False, seed=42):
         import numpy as np
         self.books, self.book_ids, self.windows = [], [], []
         self.block_size = block_size
+        self.random_offsets, self.seed = random_offsets, seed
         for line in Path(path).read_text().splitlines():
             book = json.loads(line)
             ids = np.asarray(book["ids"], dtype=np.int32)
@@ -524,13 +526,70 @@ class BookWindows:
             self.windows = [self.windows[i] for i in indices]
         if not self.windows:
             raise ValueError(f"Empty token dataset: {path}")
+        self.set_training_epoch(0)
+
+    def set_training_epoch(self, epoch):
+        """Deterministic per-book shifts; independent of global training RNG."""
+        self.epoch = int(epoch)
+        span = self.block_size-1
+        self.offsets = [int.from_bytes(hashlib.sha256(
+            f"{self.seed}:{self.epoch}:{book_id}".encode()).digest()[:8], "big") % (2*span+1)-span
+            for book_id in self.book_ids] if self.random_offsets else [0]*len(self.books)
 
     def __len__(self):
         return len(self.windows)
 
     def __getitem__(self, index):
         book, start = self.windows[index]
+        if self.random_offsets and start > 0 and start+self.block_size < len(self.books[book]):
+            # Keep the original first/last windows (and all EOS occurrences).
+            # Interior windows stay contiguous within their original book.
+            start = max(1, min(start+self.offsets[book], len(self.books[book])-self.block_size-1))
         return {"input_ids": self.books[book][start:start+self.block_size].tolist()}
+
+
+def window_epoch_callback(dataset):
+    """Use Trainer's restored epoch, including when its loader skips batches."""
+    from transformers import TrainerCallback
+
+    class WindowEpochCallback(TrainerCallback):
+        def on_epoch_begin(self, args, state, control, **kwargs):
+            # Do not expose Dataset.set_epoch: Accelerate's resumed skip loader
+            # can initially call that hook with zero even in a later epoch.
+            dataset.set_training_epoch(int(state.epoch or 0))
+            if dataset.random_offsets:
+                print(f"Training window offsets: epoch {dataset.epoch}; "
+                      "book boundaries and example lengths preserved.", flush=True)
+
+    return WindowEpochCallback()
+
+
+def training_trainer(*args, **kwargs):
+    """Shuffle from the restored training epoch, including a resumed skip loader."""
+    import torch
+    from torch.utils.data import Sampler
+    from transformers import Trainer
+
+    class EpochSampler(Sampler):
+        def __init__(self, dataset, seed):
+            self.dataset, self.seed = dataset, seed
+
+        def __iter__(self):
+            generator = torch.Generator().manual_seed(self.seed+self.dataset.epoch)
+            return iter(torch.randperm(len(self.dataset), generator=generator).tolist())
+
+        def __len__(self):
+            return len(self.dataset)
+
+    class WindowTrainer(Trainer):
+        def _get_train_sampler(self, train_dataset=None):
+            dataset = self.train_dataset if train_dataset is None else train_dataset
+            seed = self.args.seed if self.args.data_seed is None else self.args.data_seed
+            # Unlike RandomSampler, this will not be replaced by Accelerate's
+            # SeedableRandomSampler, whose epoch the skipped loader can reset.
+            return EpochSampler(dataset, seed)
+
+    return WindowTrainer(*args, **kwargs)
 
 
 class CausalCollator:
@@ -735,7 +794,6 @@ def training(args):
         EarlyStoppingCallback,
         GPT2Config,
         GPT2LMHeadModel,
-        Trainer,
         TrainerCallback,
         TrainingArguments,
         set_seed,
@@ -791,13 +849,15 @@ def training(args):
                 "learning_rate": args.learning_rate, "epochs": args.epochs, "max_steps": args.max_steps,
                 "seed": args.seed, "train_limit": args.train_limit, "eval_limit": args.eval_limit,
                 "eval_steps": args.eval_steps, "patience": args.patience, "smoke_test": args.smoke_test,
-                "warmup_ratio": args.warmup_ratio, "skip_test": args.skip_test}
+                "warmup_ratio": args.warmup_ratio, "skip_test": args.skip_test,
+                "random_window_offsets": args.random_window_offsets}
     if continuation is not None:
         settings["continue_from"] = continuation["source"]
     if resume:
         prior = json.loads((out / "run_config.json").read_text())
         prior.setdefault("warmup_ratio", .05)  # Compatibility with the original script.
         prior.setdefault("skip_test", False)
+        prior.setdefault("random_window_offsets", False)
         if prior != settings:
             raise ValueError("Run settings or dataset differ from saved run_config.json; use a new run")
     out.mkdir(parents=True, exist_ok=True)
@@ -813,7 +873,8 @@ def training(args):
         # the user's existing project model, never external pretrained GPT-2.
         model = GPT2LMHeadModel(config)
     parameters = model.num_parameters()
-    train_set = BookWindows(data / "train.jsonl", args.block_size, args.train_limit)
+    train_set = BookWindows(data / "train.jsonl", args.block_size, args.train_limit,
+                            random_offsets=args.random_window_offsets, seed=args.seed)
     val_set = BookWindows(data / "validation.jsonl", args.block_size, args.eval_limit)
     effective_batch = args.batch_size * args.accumulation
     origin = "Continued" if continuation is not None else "Random"
@@ -849,11 +910,12 @@ def training(args):
         seed=args.seed, data_seed=args.seed, report_to="none", save_safetensors=True,
         restore_callback_states_from_checkpoint=True,
     )
-    trainer = Trainer(model=model, args=training_args, train_dataset=train_set, eval_dataset=val_set,
-                      data_collator=CausalCollator(tokenizer.pad_token_id), processing_class=tokenizer,
-                      preprocess_logits_for_metrics=loss_sums, compute_metrics=token_metrics,
-                      callbacks=[SampleCallback(), EarlyStoppingCallback(early_stopping_patience=args.patience,
-                                                                         early_stopping_threshold=.002)])
+    trainer = training_trainer(
+        model=model, args=training_args, train_dataset=train_set, eval_dataset=val_set,
+        data_collator=CausalCollator(tokenizer.pad_token_id), processing_class=tokenizer,
+        preprocess_logits_for_metrics=loss_sums, compute_metrics=token_metrics,
+        callbacks=[window_epoch_callback(train_set), SampleCallback(),
+                   EarlyStoppingCallback(early_stopping_patience=args.patience, early_stopping_threshold=.002)])
     planned_steps = args.max_steps if args.max_steps > 0 else math.ceil(len(train_set)/effective_batch)*args.epochs
     if planned_steps < args.eval_steps:
         raise ValueError("Training would finish before its first evaluation; lower --eval-steps")
@@ -952,6 +1014,61 @@ def compare_dropout(args):
     return results
 
 
+def compare_windowing(args):
+    """Compare fixed versus shifted training windows; all other settings match."""
+    import gc
+
+    import torch
+    from transformers import AutoTokenizer
+    if not args.continue_from or args.resume or args.rebuild or args.smoke_test:
+        raise ValueError("compare-windowing requires --continue-from, new output, and no --resume/--rebuild/--smoke-test")
+    if args.max_steps <= 0 or args.continuation_dropout is not None:
+        raise ValueError("Set --max-steps per branch and inherit the source dropout for this comparison")
+    out = Path(args.output_dir)
+    if out.exists() and any(out.iterdir()):
+        raise ValueError("Use a new --output-dir for the windowing comparison")
+    results = {}
+    for name, shifted in (("fixed", False), ("shifted", True)):
+        branch = argparse.Namespace(**vars(args))
+        branch.command, branch.output_dir = "train", str(out / name)
+        branch.random_window_offsets, branch.skip_test = shifted, True
+        branch.patience = max(args.patience, math.ceil(args.max_steps / args.eval_steps)+1)
+        summary = training(branch)
+        best = Path(branch.output_dir) / "best"
+        tokenizer = AutoTokenizer.from_pretrained(best, local_files_only=True)
+        selected = load_continuation(best, tokenizer, summary["dataset_sha256"])
+        selected.to("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
+        passages = []
+        for split in ("train", "validation"):
+            dataset = BookWindows(Path(args.data_dir) / f"{split}.jsonl", selected.config.n_positions, limit=1)
+            for probe in corpus_probe_inputs(dataset, tokenizer, args.sample_tokens, args.seed):
+                samples = generate_samples(selected, tokenizer, [probe], args.sample_tokens, args.seed)
+                passages.append({"split": split, **probe, "generated": samples})
+                print(f"\n[{name} | {split}] PREFIX: {probe['prompt']}", flush=True)
+                for sample in samples:
+                    print(f"{sample['mode'].upper()}: {sample['continuation']}\n", flush=True)
+        write_json(best / "passage_samples.json", passages)
+        results[name] = {"random_window_offsets": shifted,
+                         "initial_validation_nll": summary["continuation"]["initial_validation_nll"],
+                         "best_new_validation_nll": summary["continuation"]["best_new_validation_nll"],
+                         "selected_validation_nll": summary["best_validation_nll"],
+                         "retained_initial_model": summary["continuation"]["retained_initial_model"],
+                         "updates": summary["global_step"], "best_model": str(best),
+                         "samples": json.loads((best / "samples.json").read_text()), "passage_samples": passages}
+        write_json(out / "comparison.json", results)
+        del selected, tokenizer
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    print("\nWINDOWING COMPARISON (same starting model, target counts, and update budget):")
+    print(json.dumps({name: {key: value for key, value in result.items()
+                             if key not in {"samples", "passage_samples"}}
+                      for name, result in results.items()}, indent=2))
+    print(f"Read both sets of passages in {out / 'comparison.json'}. "
+          "Loss improvement alone is not evidence of coherent generation.")
+    return results
+
+
 def model_card(summary):
     return f"""---
 language: en
@@ -976,6 +1093,7 @@ repetition, dated language, and historical biases. Repeated epochs are not new d
 
 Best validation NLL: {summary['best_validation_nll']}
 Continuation details: {json.dumps(summary.get('continuation'))}
+Training windows: {'shifted within books each epoch' if summary['run'].get('random_window_offsets') else 'fixed'}
 Test token perplexity: {summary['test'].get('test_perplexity', 'not evaluated in this development run')}
 Smoke test: {summary['smoke_test']}; limited data: {summary['limited_data']}.
 Scores use this model's tokenizer and are not directly comparable to other vocabularies.
@@ -1196,7 +1314,7 @@ def inference(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["prepare", "train", "compare-dropout", "diagnose",
+    parser.add_argument("command", choices=["prepare", "train", "compare-dropout", "compare-windowing", "diagnose",
                                             "compare-decoding", "evaluate", "generate"])
     parser.add_argument("--corpus", help="Optional subset of the embedded Christmas URLs, as a Python sources list")
     parser.add_argument("--data-dir", default=str(ROOT / "data"))
@@ -1231,6 +1349,8 @@ def main(argv=None):
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--smoke-test", action="store_true", help="Tiny CPU model, 3 updates, limited data; not quality training")
     parser.add_argument("--train-limit", type=int, help="Diagnostic window cap; omitted for full training")
+    parser.add_argument("--random-window-offsets", action="store_true",
+                        help="Shift interior training windows per book/epoch; keep evaluation fixed")
     parser.add_argument("--eval-limit", type=int, help="Diagnostic window cap; omitted for full evaluation")
     parser.add_argument("--diagnostic-windows", type=int, default=1024,
                         help="Maximum windows per train/validation split for diagnose")
@@ -1265,6 +1385,8 @@ def main(argv=None):
         training(args)
     elif args.command == "compare-dropout":
         compare_dropout(args)
+    elif args.command == "compare-windowing":
+        compare_windowing(args)
     elif args.command == "diagnose":
         diagnose(args)
     elif args.command == "compare-decoding":

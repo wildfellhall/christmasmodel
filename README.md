@@ -209,6 +209,37 @@ NOTEBOOK_ARGS = [
 
 Contrastive search is implemented directly in this file using the [published ranking rule](https://huggingface.co/blog/introducing-csearch). It evaluates four candidate tokens per step and costs more than greedy/sampling. The implementation matches a full-prefix reference calculation in CPU tests, caps output at the model's context limit, suppresses padding, and stops on EOS. GGUF weights remain exportable, but this Python decoding procedure is not encoded in GGUF; an external runtime may not provide the same search method.
 
+### Train with varied window positions: a controlled experiment
+
+The reported decoding comparison found duplicate token four-gram rates of **46.99%** for greedy, **0.18%** for sampling, and **0%** for blocked sampling and contrastive search. Every output reached 64 tokens, so shorter outputs did not account for these differences. The shared sampled passages still lost characters and meaning; contrastive output also lost the situation and repeated "her aunt." This comparison has not demonstrated a coherence fix. Low repetition is insufficient as a quality target.
+
+The next experiment changes training-data presentation. The original training windows are fixed: a token sees the same available preceding context and the same position within its window on every pass. With `--random-window-offsets`, each book gets a deterministic new offset each epoch. Interior windows move by up to 511 tokens with the default context size; they remain contiguous, in order, and entirely inside that same book. First and last windows, EOS occurrences, row lengths, and the number of training examples are preserved. This provides different contextual views of the existing Christmas text without adding or rewriting stories. It is an unvalidated hypothesis for this model, not a demonstrated cause or cure for incoherence.
+
+Run the paired comparison from your existing lower-dropout checkpoint:
+
+```python
+NOTEBOOK_ARGS = [
+    "compare-windowing",
+    "--continue-from", "/content/runs/christmas-dropout-comparison/lower-dropout/best",
+    "--data-dir", "/content/data",
+    "--output-dir", "/content/runs/christmas-window-comparison",
+    "--max-steps", "1000",       # Per branch: 2,000 updates total
+    "--learning-rate", "1e-4",
+    "--warmup-ratio", "0.03",
+    "--eval-steps", "200",
+    "--sample-steps", "200",
+    "--sample-tokens", "64",
+]
+```
+
+Both branches start independently from exactly the same model, inherit its architecture/tokenizer/dropout, and get the same optimizer, LR schedule, shuffled example indices, target counts, and 1,000-update budget. `fixed/` uses the original chunks; `shifted/` varies interior positions. At the default batch size this is about 2.4 passes per branch. Both use a fresh optimizer, 30 warmup updates, and decay from 1e-4 to 1e-5. These are experimental settings, not established optimal values. The control distinguishes gains from additional optimization at this LR from gains associated with the changed windows.
+
+Validation remains the original fixed whole-book split, and neither branch evaluates the test set. No prepared data are rebuilt. The source checkpoint remains untouched; each branch retains its starting model if no checkpoint beats its initial validation NLL. `comparison.json` records starting/best NLL, selected paths, fixed-opening samples, and continuations from the same three train/three validation passages. The latter are also saved as `best/passage_samples.json`. Check sentence structure, character identity, locations, and the connection to the opening across both branches. A small loss improvement alone does not establish that this experiment met the coherence target.
+
+Shifted windows can overlap or omit some interior targets on an individual pass. They provide sampled coverage rather than the original exactly-once target coverage; their example lengths and total target counts still match the control. The underlying corpus and split assignments remain unchanged. Offset choices and shuffling depend only on the saved seed and training epoch, so a resumed run reproduces them. Regression checks cover resuming partway through a later epoch, with matching batches and final weights for both fixed and shifted modes. The sampler also avoids an epoch-reset issue in the pinned library's skipped-batch loader.
+
+For one independent training stage, add `--random-window-offsets` to `train --continue-from ...`. Existing runs keep fixed windows by default. To resume an interrupted comparison branch, use `train --resume` with that branch's output directory, the same numerical settings, `--skip-test`, and the saved patience from `run_config.json`. Include `--random-window-offsets` for the shifted branch only, and omit `--continue-from`. After an individual resume, branch results are updated but the parent `comparison.json` is not regenerated automatically.
+
 ## Export weights and download GGUF
 
 After training, install the exporter dependencies. These preserve Colab's CUDA PyTorch installation.
@@ -269,7 +300,7 @@ To upload an existing export, or retry an interrupted upload without converting 
 - Use the `sources` list embedded in `model.py`. For an explicit `--corpus` override, parse `sources` using `ast.literal_eval`, without importing/executing that file.
 - Require English metadata and Gutenberg start/end markers; reject HTML/error pages and very short results. Remove the license wrapper, production credits, illustration blocks, and page markers. Unwrap long prose lines while retaining short verse lines and paragraph breaks. Cleanup is conservative: title pages, tables of contents, and some editorial material can remain.
 - Detect near-identical editions using content-sampled 13-word shingles. Group books sharing at least 12 sampled shingles and 5% of the smaller signature; split whole groups approximately 90/5/5 by word count. This keeps detected anthology overlap in one partition. Authors may span splits. Small or heavily edited quotations can escape this heuristic; it is not proof of zero contamination. The audit also found zero cross-split exact paragraphs of at least 80 normalized words.
-- Fit BPE only on training books. Begin/end books with EOS. Build windows within each book with a one-token overlap, so every next-token target is scored once and tails are retained. Padding is masked with `-100`; genuine EOS labels remain supervised.
+- Fit BPE only on training books. Begin/end books with EOS. Default training windows and all evaluation windows use a one-token overlap, so every next-token target is scored once and tails are retained. Optional shifted training windows sample different contextual views, with the same row lengths and preserved book edges. Padding is masked with `-100`; genuine EOS labels remain supervised.
 - Shuffle training windows, keep validation/test fixed, and select by token-weighted validation NLL. Print fixed-seed samples without changing training RNG state. Reserve test text until model selection ends.
 
 ## Verification
