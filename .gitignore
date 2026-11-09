@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+data/
+runs/
+exports/
+llama.cpp/
+*.gguf
+*.safetensors
+*.pt
+*.bin

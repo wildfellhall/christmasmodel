@@ -1,0 +1,6 @@
+-r requirements.txt
+# Minimal dependencies for the pinned llama.cpp GPT-2 converter.
+# Keep Colab's CUDA-enabled torch; do not install llama.cpp's CPU torch pin.
+numpy>=2.2.6,<3
+sentencepiece==0.2.1
+protobuf>=4.21,<5

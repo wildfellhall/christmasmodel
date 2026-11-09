@@ -1,0 +1,126 @@
+{
+  "cleaning_version": 1,
+  "source_sha256": "47568b74f9fefff60759464ccb36d610dd5b02b2772f2de40be6f9f736ef2dfa",
+  "seed": 42,
+  "requested_vocab_size": 8192,
+  "vocab_size": 8192,
+  "sources": 189,
+  "downloaded": 189,
+  "failures": [],
+  "duplicates": [
+    {
+      "id": "19608",
+      "duplicate_of": "10679"
+    },
+    {
+      "id": "17743",
+      "duplicate_of": "30907"
+    }
+  ],
+  "overlaps": [
+    {
+      "ids": [
+        "46",
+        "28198"
+      ],
+      "containment": 0.5351
+    },
+    {
+      "ids": [
+        "28198",
+        "653"
+      ],
+      "containment": 0.5554
+    },
+    {
+      "ids": [
+        "28098",
+        "38279"
+      ],
+      "containment": 0.9374
+    },
+    {
+      "ids": [
+        "28198",
+        "20425"
+      ],
+      "containment": 0.1615
+    },
+    {
+      "ids": [
+        "20425",
+        "43763"
+      ],
+      "containment": 0.9519
+    },
+    {
+      "ids": [
+        "28198",
+        "1392"
+      ],
+      "containment": 0.3585
+    },
+    {
+      "ids": [
+        "69068",
+        "69854"
+      ],
+      "containment": 0.0607
+    },
+    {
+      "ids": [
+        "67105",
+        "34571"
+      ],
+      "containment": 0.7742
+    },
+    {
+      "ids": [
+        "46",
+        "28308"
+      ],
+      "containment": 0.0829
+    },
+    {
+      "ids": [
+        "20425",
+        "28308"
+      ],
+      "containment": 0.0908
+    },
+    {
+      "ids": [
+        "43763",
+        "28308"
+      ],
+      "containment": 0.2404
+    },
+    {
+      "ids": [
+        "17770",
+        "28308"
+      ],
+      "containment": 0.0713
+    }
+  ],
+  "independent_groups": 177,
+  "splits": {
+    "train": {
+      "books": 168,
+      "words": 4606880,
+      "target_tokens": 6675415
+    },
+    "validation": {
+      "books": 9,
+      "words": 256540,
+      "target_tokens": 365092
+    },
+    "test": {
+      "books": 10,
+      "words": 256315,
+      "target_tokens": 368648
+    }
+  },
+  "audit_note": "Measured from the repository corpus; no full quality-training run was performed during implementation.",
+  "cross_split_exact_paragraphs_at_least_80_words": 0
+}
