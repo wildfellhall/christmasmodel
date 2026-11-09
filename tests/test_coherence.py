@@ -169,7 +169,8 @@ class IntegerTokenizer:
         return ' '.join(map(str, ids))
 
 
-def test_coherence_resume_preserves_batches_gradients_and_all_weights(tmp_path):
+@pytest.mark.parametrize('with_continuity', [False, True])
+def test_coherence_resume_preserves_batches_gradients_and_all_weights(tmp_path, with_continuity):
     for name, offset in [('original', 2), ('new', 25)]:
         (tmp_path/f'{name}.jsonl').write_text('\n'.join(json.dumps({'id': f'{name}-{i}',
             'ids': [offset+i % 2]*620}) for i in range(3)))
@@ -181,20 +182,31 @@ def test_coherence_resume_preserves_batches_gradients_and_all_weights(tmp_path):
         model.load_state_dict(initial)
         base = pipeline.WinterReplayDataset(*(pipeline.ContextBookWindows(tmp_path/f'{name}.jsonl',
             256, lookback=128, random_offsets=True) for name in ('original', 'new')))
-        dataset = pipeline.CoherenceDataset(base, IntegerTokenizer())
+        pairs = [{'book_id': f'{name}-{i}', 'prefix_ids': [2+i]*8, 'chosen_ids': [2+i]*8,
+                  'rejected_ids': [20+i]*8, 'difference_start': 0, 'kind': 'entity'}
+                 for name in ('original', 'new') for i in range(3)] if with_continuity else []
+        dataset = pipeline.CoherenceDataset(base, IntegerTokenizer(), pairs)
         assert dataset[4]['input_ids'] == base[4]['input_ids']
         assert dataset[4]['labels'] == base[4]['labels']
         assert dataset[4]['pool'] == 1 and dataset[5]['pool'] == 0
         observed = []
         model.register_forward_pre_hook(lambda m, a, k: observed.append(k['input_ids'].tolist())
             if m.training else None, with_kwargs=True)
+        cfg = objective_config()
+        if with_continuity:
+            cfg.update(continuity_weight=.5, continuity_positive_weight=.5,
+                       continuity_beta=2., continuity_margin=.2, continuity_pairs_per_batch=2,
+                       online_weight=.5, online_every=2, online_tokens=8, online_beta=2.)
         trainer = pipeline.training_trainer(model=model, args=TrainingArguments(output_dir=str(path),
             max_steps=5, per_device_train_batch_size=4, gradient_accumulation_steps=2, save_steps=3,
             learning_rate=5e-5, use_cpu=True, report_to='none', logging_strategy='no',
             disable_tqdm=True, seed=42, remove_unused_columns=False), train_dataset=dataset,
             data_collator=pipeline.CoherenceCollator(1), callbacks=[pipeline.window_epoch_callback(dataset)],
-            coherence_config=objective_config())
+            coherence_config=cfg)
         trainer.train(resume_from_checkpoint=str(resume) if resume else None)
+        if with_continuity:
+            assert all(torch.equal(v, trainer.continuity_reference.state_dict()[k]) for k, v in initial.items())
+            assert all(p.grad is None for p in trainer.continuity_reference.parameters())
         exposure = pipeline.training_exposure(dataset, 8, 5, 42)
         assert exposure['scored_targets'] == pipeline.training_exposure(base, 8, 5, 42)['scored_targets']
         return model, observed
@@ -252,7 +264,8 @@ def test_default_command_enables_five_methods_and_retains_legacy_defaults(monkey
         pipeline.main(['train-coherence', '--unlikelihood-every', '0'])
 
 
-def test_one_run_pipeline_and_final_checkpoint_recovery(tmp_path, monkeypatch):
+@pytest.mark.parametrize('command', ['train-coherence', 'train-continuity'])
+def test_one_run_pipeline_and_final_checkpoint_recovery(tmp_path, monkeypatch, command):
     """Run actual training/review/save paths; only replace external corpus retrieval."""
     from transformers import TrainerCallback
     data, out = tmp_path/'data', tmp_path/'run'
@@ -276,6 +289,10 @@ def test_one_run_pipeline_and_final_checkpoint_recovery(tmp_path, monkeypatch):
         'train_sha256': pipeline.hashlib.sha256(encoded.encode()).hexdigest()}
     monkeypatch.setattr(pipeline, 'prepare', lambda args: report)
     monkeypatch.setattr(pipeline, 'prepare_winter_material', lambda *a: (manifest, encoded))
+    monkeypatch.setattr(pipeline, 'build_continuity_pairs', lambda dataset, *a, **k: [
+        {'book_id': book, 'prefix_ids': ids[1:9].tolist(), 'chosen_ids': ids[9:17].tolist(),
+         'rejected_ids': [30]*8, 'difference_start': 0, 'kind': 'entity', 'pair_id': book}
+        for book, ids in zip(dataset.book_ids, dataset.books)])
     monkeypatch.setattr(pipeline, 'make_capacity_benchmark', lambda *a, **k: {
         'dataset_sha256': signature, 'sampling_seeds': [42], 'generation_tokens': 12,
         'prompts': [{'prompt_id': f'p{i}', 'book_id': f'validation-{i}',
@@ -299,7 +316,7 @@ def test_one_run_pipeline_and_final_checkpoint_recovery(tmp_path, monkeypatch):
         return trainer
 
     monkeypatch.setattr(pipeline, 'training_trainer', observed_trainer)
-    argv = ['train-coherence', '--data-dir', str(data), '--output-dir', str(out), '--smoke-test',
+    argv = [command, '--data-dir', str(data), '--output-dir', str(out), '--smoke-test',
             '--rerank-candidates', '2', '--unlikelihood-tokens', '32']
     with pytest.raises(InterruptedError):
         pipeline.main(argv)
@@ -311,10 +328,13 @@ def test_one_run_pipeline_and_final_checkpoint_recovery(tmp_path, monkeypatch):
     summary = json.loads((out/'expanded/best/training_summary.json').read_text())
     assert summary['global_step'] == 3 and not summary['test']
     cfg = summary['run']['winter_recipe']['coherence']
-    assert cfg['positions'] == 1024 and cfg['context_weight'] == .1
+    assert cfg['positions'] == (512 if command == 'train-continuity' else 1024)
+    assert cfg['context_weight'] == (0. if command == 'train-continuity' else .1)
+    if command == 'train-continuity':
+        assert cfg['continuity_weight'] == .5
     assert summary['training_exposure']['scored_targets'] > 0
     last = GPT2LMHeadModel.from_pretrained(out/'expanded/last')
-    assert last.config.n_positions == 1024
+    assert last.config.n_positions == cfg['positions']
     assert all(torch.equal(v, last.state_dict()[k]) for k, v in final_weights.items())
     review = json.loads((out/'expanded/reviews/step-3/coherence.json').read_text())
     assert review['reranked_samples'] and review['samples']
@@ -327,3 +347,123 @@ def test_one_run_pipeline_and_final_checkpoint_recovery(tmp_path, monkeypatch):
     pipeline.main(argv+['--resume'])
     assert blind.read_text().endswith('manual review preserved\n')
     assert trained == [1, 2, 3]
+
+
+def test_continuity_uses_person_names_and_keeps_dialogue_punctuation():
+    prefix = 'Then Helen said yes to Ronnie. Now Ronnie said hello to Helen and the Infant.'
+    target = ' Helen was glad to come home. Ronnie opened the door for her.'
+    variants = dict(pipeline.continuity_corruptions(prefix, target, {'Helen', 'Ronnie'}))
+    assert variants['entity'].startswith(' Ronnie was') and 'Infant' not in variants['entity']
+    assert 'was not glad' in variants['polarity:add_not']
+    assert variants['order'].startswith(' Ronnie opened')
+    assert 'order' not in dict(pipeline.continuity_corruptions(prefix, ' "Come home," Helen said. "It is late."'))
+    text = 'Mrs. Dalmain waited for Dr. Jones. He arrived.'
+    assert [text[:end] for end in pipeline.prose_sentence_ends(text)] == [
+        'Mrs. Dalmain waited for Dr. Jones.', text]
+
+
+def test_pair_bank_preserves_original_token_slices_and_balances_negation(tmp_path):
+    paragraphs = [
+        'Then Helen said hello to Ronnie in the kitchen. Ronnie answered Helen while the snow fell outside. '
+        'The two friends sat beside the fire and looked at the gifts on the table. '
+        f'Helen was {negation}ready to leave the room. Ronnie opened the door and brought the children inside. '
+        'The children gathered around the warm fire and listened to their favorite story. '
+        'Then Helen said they must all go home before the snow covered the narrow road. '
+        for negation in ('', 'not ') for _ in range(8)]
+    bpe = ByteLevelBPETokenizer()
+    bpe.train_from_iterator(paragraphs, vocab_size=300, special_tokens=['<|endoftext|>', '<|pad|>'])
+    bpe.save_model(str(tmp_path))
+    tok = GPT2TokenizerFast(vocab_file=str(tmp_path/'vocab.json'), merges_file=str(tmp_path/'merges.txt'),
+        eos_token='<|endoftext|>', pad_token='<|pad|>')
+    ids = [tok.eos_token_id]+tok.encode('\n\n'.join(paragraphs))+[tok.eos_token_id]
+    path = tmp_path/'train.jsonl'
+    path.write_text(json.dumps({'id': 'train-only', 'ids': ids}))
+    dataset = pipeline.BookWindows(path, 512)
+    first = pipeline.build_continuity_pairs(dataset, tok)
+    assert first and first == pipeline.build_continuity_pairs(dataset, tok)
+    for pair in first:
+        assert pair['book_id'] == 'train-only'
+        assert pair['prefix_ids'] == ids[pair['start_token']:pair['target_start_token']]
+        assert pair['chosen_ids'] == ids[pair['target_start_token']:pair['end_token']]
+        assert pair['chosen_ids'] != pair['rejected_ids']
+        start = pair['difference_start']
+        assert pair['chosen_ids'][:start] == pair['rejected_ids'][:start]
+        assert 24 <= len(pair['chosen_ids']) <= 96
+    assert sum(p['variant'] == 'polarity:add_not' for p in first) == sum(
+        p['variant'] == 'polarity:remove_not' for p in first)
+
+
+def test_preference_training_changes_the_models_token_choice_without_a_reranker():
+    torch.manual_seed(42)
+    model = small_model(64).train()
+    prefix = [2, 3, 4, 5, 6, 7]
+    with torch.no_grad():
+        logits = model(torch.tensor([prefix])).logits[0, -1]
+        rejected = int(logits[2:].argmax())+2
+        chosen = int(logits[2:].argmin())+2
+    pair = {'prefix_ids': prefix, 'chosen_ids': [chosen]*4, 'rejected_ids': [rejected]*4,
+            'difference_start': 0, 'kind': 'entity'}
+    rng = torch.get_rng_state().clone()
+    before, positive, stats = pipeline.continuity_preference_loss(model, [pair], 1)
+    assert model.training and torch.equal(rng, torch.get_rng_state())
+    assert stats['gap_sum'] < 0
+    optimizer = torch.optim.AdamW(model.parameters(), lr=.003)
+    for _ in range(30):
+        optimizer.zero_grad()
+        loss, positive, _ = pipeline.continuity_preference_loss(model, [pair], 1)
+        (loss+.5*positive).backward()
+        optimizer.step()
+    after, _, stats = pipeline.continuity_preference_loss(model, [pair], 1)
+    assert after < before and stats['gap_sum'] > 0
+    with torch.no_grad():
+        assert int(model(torch.tensor([prefix])).logits[0, -1].argmax()) == chosen
+
+
+def test_continuity_command_defaults_inherit_context_and_focus_the_new_objective(monkeypatch):
+    captured = []
+    monkeypatch.setattr(pipeline, 'finetune_winter', captured.append)
+    pipeline.main(['train-continuity'])
+    args, = captured
+    assert args.coherence_context is None and args.max_steps == 1500 and args.learning_rate == 2e-5
+    assert args.curriculum_fraction == args.context_loss_weight == 0
+    assert args.continuity_weight == .5 and args.winter_lookback == 128
+
+
+def test_online_reference_loss_moves_relative_preference_without_changing_anchor():
+    import copy
+    torch.manual_seed(42)
+    model = small_model(64).train()
+    reference = copy.deepcopy(model).eval().requires_grad_(False)
+    before_reference = {k: v.clone() for k, v in reference.state_dict().items()}
+    pair = {'prefix_ids': [2, 3, 4, 5], 'chosen_ids': [6, 7, 8], 'rejected_ids': [9, 9, 9]}
+    loss, advantage = pipeline.reference_preference_loss(model, reference, pair, 1)
+    assert advantage == 0 and loss.item() == pytest.approx(0.69314718)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=.001)
+    loss.backward()
+    optimizer.step()
+    after, advantage = pipeline.reference_preference_loss(model, reference, pair, 1)
+    assert after < loss and advantage > 0 and model.training
+    assert all(torch.equal(v, reference.state_dict()[k]) for k, v in before_reference.items())
+    assert all(p.grad is None for p in reference.parameters())
+
+
+def test_online_loss_runs_once_per_update_across_accumulation(monkeypatch):
+    cfg = objective_config()
+    cfg.update(online_weight=.5, online_every=2, context_weight=0, unlikelihood_weight=0,
+               curriculum_fraction=0)
+    model = small_model(32).train()
+    trainer = SimpleNamespace(coherence_config=cfg, coherence_stats=defaultdict(float),
+        state=SimpleNamespace(global_step=0, max_steps=3), _ul_step=-1, _online_step=-1)
+    calls = []
+    monkeypatch.setattr(pipeline, 'online_continuity_loss', lambda *a: (
+        calls.append(1) or model.lm_head.weight.sum()*0+1, 1, 0.))
+    batch = pipeline.CoherenceCollator(1)([{'input_ids': [2, 3, 4], 'continuity_pair': {'fixture': True}}])
+    losses = [pipeline.coherence_loss(trainer, model, batch, 8) for _ in range(4)]
+    assert len(calls) == 1
+    torch.testing.assert_close(losses[0]-losses[1], torch.tensor(.5))
+    trainer.state.global_step = 1
+    pipeline.coherence_loss(trainer, model, batch, 8)
+    assert len(calls) == 1
+    trainer.state.global_step = 2
+    pipeline.coherence_loss(trainer, model, batch, 8)
+    assert len(calls) == 2

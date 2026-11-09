@@ -1,12 +1,47 @@
 # Christmasmodel
 
-Train literary continuation models from random weights on Gutenberg fiction. The pasted-cell default in [model.py](model.py) now runs **five coherence interventions together** on an existing project model, using the original Christmas stories and all approved pre-1920 winter selections. [export.py](export.py) packages Hugging Face weights and converts to GGUF.
+Train literary continuation models from random weights on Gutenberg fiction. The pasted-cell default in [model.py](model.py) now trains **local continuation preferences directly**, using the original Christmas stories and all approved pre-1920 winter selections. [export.py](export.py) packages Hugging Face weights and converts to GGUF.
 
-The original commands retain the original Christmas-only restriction. `finetune-winter` and `train-coherence` use the approved additions without changing old data, splits or token IDs, or loading outside pretrained weights.
+The original commands retain the original Christmas-only restriction. Winter, coherence and continuity commands use the approved additions without changing old data, splits or token IDs, or loading outside pretrained weights.
 
-## Five coherence interventions (current default)
+## Direct continuity training (current default)
 
-**Paste the entire `model.py` into one Colab GPU cell.** The source catalogs, dependencies and implementation are inline. The default runs one combined continuation; no experiment ZIP or extra script is required. Keep the project's existing weights and prepared data in the notebook runtime or mounted Drive.
+Paste **all of `model.py` into one Colab GPU cell**, with the existing prepared data and project weights available. The inline source lists and dependencies remain self-contained. Its default is:
+
+```python
+NOTEBOOK_ARGS = ["train-continuity", "--output-dir", "runs/christmas-continuity"]
+```
+
+This stage trains the model's token probabilities; it adds no external model or inference-only classifier. It prefers `runs/christmas-coherence/expanded/last`, then that run's `best`, followed by the existing winter-v2, winter and scene defaults. Explicit `--continue-from` overrides selection. Context length is inherited, including an already-trained 1,024-position model. Use a new output directory; `--resume` subsequently restores this stage's frozen data, optimizer and settings.
+
+The added supervision is built from actual training books:
+
+1. Select an exact, sentence-bounded **48–160-token prefix and 24–96-token continuation**. Preserve original positive token IDs and exclude chapter transitions. Abbreviations such as “Mrs.” do not split sentences.
+2. Construct an alternative by replacing a recurring speaker name with another speaker from the same context, adding/removing auxiliary negation, or swapping two narrative sentences. Names require speaker evidence in the same book. Sentence swaps exclude quoted dialogue; negation additions/removals are balanced to prevent a shortcut that simply suppresses “not.” These are automatic corruption preferences, not human annotations establishing that every alternative is impossible.
+3. Compare the original and altered continuation **under the same prefix**. Score at most 32 tokens after their first difference, so a changed name or event is not diluted across an otherwise identical long passage. Paired forwards disable dropout while retaining gradients.
+4. Optimize `softplus(2 × (0.2 − gap))`, where `gap = rejected_NLL − original_NLL`, weighted **0.5**. Add **0.5 × original-continuation CE** to anchor positive likelihood. Ordinary source-replay CE remains at weight **1**. At most two preference pairs are processed per microbatch, and all auxiliary terms scale with the accumulation-wide target denominator.
+
+There is also an **online source-versus-model objective**. Every two optimizer updates, the student generates up to 64 tokens from a training prefix, alternating greedy and sampled generation. The actual source continuation is preferred to that rollout using a length-normalized, DPO-style log-ratio objective against a **frozen copy of the starting project model** (beta 2, weight 0.5). This targets the student's own output tendencies, including failures not covered by the three corruption rules. The reference introduces no outside weights. Original CE anchors learning; generated prose is never used as a positive example. Source preference does not mean every other continuation is objectively wrong.
+
+This follows the source-versus-model training idea of [SPIN](https://proceedings.mlr.press/v235/chen24j.html), with an online rollout schedule and length normalization rather than that paper's exact recipe. The reference stays frozen across optimizer resumes. Mining preserves training RNG streams and runs once per scheduled optimizer update, independent of gradient accumulation. A small sample of mined pairs is saved in `online_negatives.jsonl`; logs include the actual pair count and reference-relative preference gap. `--online-preference-weight 0` disables this objective. The reference copy and generated rollouts add memory and runtime.
+
+The loss uses a reference-free preference formulation related to [SimPO](https://arxiv.org/abs/2405.14734), adapted to changed spans and coupled to positive CE. It is not a reproduction of that paper's large-model results. The new stage defaults to **1,500 updates, LR 2e-5, batch 4 × accumulation 4**, inherited dropout, 3% warmup and cosine decay to 2e-6. It keeps the 50/50 original/additional window mixture and generated-loop penalty. The earlier simplicity curriculum and unrelated-book-prefix objective default to zero here so the new supervision has a clear purpose. `--continuity-weight` adjusts its strength; 0 disables the preference and positive-continuation auxiliary terms together.
+
+`material/continuity_train.json` and `continuity_validation.json` freeze every pair and its provenance. Training pairs come only from training books; validation books supply evaluation pairs only. No test-book preference pairs are built. The frozen recipe hashes both banks and rejects changed material on resume. Validation reports preference accuracy and gap **separately for names, polarity and order**, alongside original 512-window NLL and raw generated prose. Preference accuracy is not a narrative-quality score.
+
+Console output now separates **PROMPT** and **GENERATED**, and inference prints the checkpoint path. `expanded/last/` retains the actual final update; `expanded/best/` remains selected by validation NLL. The default export cell now selects `runs/christmas-continuity/expanded/last`. Standard GPT-2 weights remain compatible with Hugging Face and GGUF; reranking is optional inference code, not a requirement for using the learned changes.
+
+Execution tests include actual optimization that reverses a tiny model's initially wrong next-token choice without reranking, frozen-reference gradient checks, and exact interrupted/resumed training with online mining enabled. These test the learning machinery; prose from the full model must still be assessed directly.
+
+**Local execution, 2026-11-09:** two 400-update checks were run on the available 13,989,888-parameter project checkpoint, using 10,250 training pairs from the original/approved supplementary pools, batch 4 × accumulation 2, and six unchanged validation prompts with greedy/sampled 64-token generation. The corruption-only run changed held-out preference accuracy from 29/44 to 30/44. Adding online preferences changed it to 31/44, including entity comparisons from 7/10 to 9/10; order stayed 12/22 and polarity stayed 10/12. Full validation NLL changed from 3.782808 to 3.792165 with the combined objective. **Raw prose still lost narrative meaning and sometimes looped. These runs do not demonstrate the requested coherence level.** They verify actual weight/output changes rather than only execution of tiny test models. Source weights were preserved and no test-set evaluation ran. The full 1,500-update Colab recipe has not been completed locally. The repository test suite has **93 passing tests**.
+
+```bash
+python model.py generate --model-dir runs/christmas-continuity/expanded/last --decode-mode sample --prompt "Mary heard a knock at the door. She put down her book and"
+```
+
+## Five coherence interventions (previous recipe)
+
+To repeat the previous combined recipe, paste the entire `model.py` and change the arguments below. Keep the project's existing weights and prepared data in the notebook runtime or mounted Drive.
 
 ```python
 NOTEBOOK_ARGS = ["train-coherence", "--output-dir", "runs/christmas-coherence"]
@@ -45,7 +80,7 @@ python model.py generate --model-dir runs/christmas-coherence/expanded/last --de
 
 Disable methods with `--curriculum-fraction 0`, `--context-loss-weight 0`, `--unlikelihood-weight 0`, `--coherence-context 512`, or inference `--decode-mode sample`. Changing training settings requires a new output directory. Optional `--with-control` adds an original-corpus-only branch **with the same five methods**; default is just the combined branch.
 
-**Export:** paste all of `export.py` after training. Notebook defaults select `runs/christmas-coherence/expanded/last`, write `exports/christmas-coherence`, verify and download F16 GGUF. Upload remains opt-in through `--repo-id`. **Reranking lives in `model.py`, not GGUF**; other inference engines need equivalent candidate selection to reproduce it.
+**Export this earlier recipe:** set `EXPORT_NOTEBOOK_ARGS` to select `runs/christmas-coherence/expanded/last` and an unused export directory. Upload remains opt-in through `--repo-id`. **Reranking lives in `model.py`, not GGUF**; other inference engines need equivalent candidate selection to reproduce it.
 
 **85 tests pass**, covering old-context logit preservation, new-position and auxiliary gradients, accumulation scaling, exact interrupted/resumed training, candidate provenance, and the complete three-update save/recovery path. These small execution tests do not establish full-size prose quality or full Colab GPU execution.
 

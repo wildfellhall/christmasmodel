@@ -5,10 +5,11 @@ one code cell, and run it. Dependencies are installed and training starts using
 the source list embedded below. No repository clone or corpus.py is required.
 Edit NOTEBOOK_ARGS below to change options or resume a notebook run.
 
-The default pasted cell runs train-coherence from existing project weights:
-curriculum, context discrimination, generated-repetition unlikelihood, trained
-longer context, and candidate reranking. All approved winter selections and the
-original Christmas stories remain the positive training data.
+The default pasted cell runs train-continuity from existing project weights:
+original next sentences versus same-passage entity, polarity and order changes,
+with original-text replay, positive continuation loss and repetition unlikelihood.
+All approved winter selections and the original Christmas stories remain the
+positive training data. No external model or generated positive prose is used.
 Keep the original prepared data and checkpoint available; nothing is rebuilt.
 Use --plan-only to inspect the budget, --smoke-test for a tiny execution check,
 and --resume to recover without restarting completed branches.
@@ -39,11 +40,11 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
-# Prefer runs/christmas-winter-v2/expanded/best, then christmas-winter/expanded/best,
-# then christmas-scenes/control/best. Override --continue-from if
+# Prefer runs/christmas-coherence/expanded/last, then that run's best; fall back to
+# winter-v2/expanded/best, winter/expanded/best, or scenes/control/best. Override --continue-from if
 # your files are on Drive. Add --resume after a disconnect (omit --continue-from).
 # For Colab persistence, set --data-dir and --output-dir to mounted Drive paths.
-NOTEBOOK_ARGS = ["train-coherence", "--output-dir", "runs/christmas-coherence"]
+NOTEBOOK_ARGS = ["train-continuity", "--output-dir", "runs/christmas-continuity"]
 NOTEBOOK_REQUIREMENTS = [
     "torch>=2.6,<3", "transformers==4.57.6", "tokenizers==0.22.2", "accelerate==1.12.0",
     "huggingface-hub==0.36.2", "numpy>=1.26,<3", "requests>=2.32,<3", "safetensors>=0.4",
@@ -1504,11 +1505,249 @@ def passage_simplicity(text):
     return max(.5, min(1.5, value))
 
 
+def prose_sentence_ends(text):
+    """Conservative punctuation boundaries: titles/initials are not sentences."""
+    ends = []
+    abbreviations = {'mr', 'mrs', 'ms', 'dr', 'st', 'rev', 'prof', 'jr', 'sr', 'etc', 'vs'}
+    for match in re.finditer(r'[.!?][\"\u201d\u2019\x27)]*(?=\s|$)', text):
+        word = re.search(r'([A-Za-z]+)$', text[max(0, match.start()-80):match.start()])
+        if text[match.start()] == '.' and word and (word[1].lower() in abbreviations or len(word[1]) == 1):
+            continue
+        ends.append(match.end())
+    return ends
+
+
+def continuity_corruptions(prefix, target, person_names=None):
+    """Corpus-derived negatives, not human labels or a semantic truth oracle."""
+    alternatives = []
+    # Names must occur inside sentences in the prefix, avoiding ordinary sentence starters.
+    names = sorted(set(re.findall(r'(?<=[a-z,;] )([A-Z][a-z]{2,})\b', prefix)) -
+                   {'Christmas', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday',
+                    'Saturday', 'December', 'January', 'February', 'God', 'Lord'})
+    if person_names is not None:
+        names = [name for name in names if name in person_names]
+    for name in names:
+        if re.search(r'\b'+re.escape(name)+r'\b', target):
+            other = next((n for n in names if n != name), None)
+            if other:
+                alternatives.append(('entity', re.sub(r'\b'+re.escape(name)+r'\b', other, target, count=1)))
+                break
+    # Require an auxiliary construction: do not turn lexical "had a gift" into malformed prose.
+    match = re.search(r'\b(was|were|is|are|could|would|should|will|can)( not)?\b', target, re.I)
+    if match:
+        replacement = match[1]+('' if match[2] else ' not')
+        variant = 'polarity:remove_not' if match[2] else 'polarity:add_not'
+        alternatives.append((variant, target[:match.start()]+replacement+target[match.end():]))
+    boundaries = prose_sentence_ends(target)
+    if len(boundaries) >= 2:
+        first, second = boundaries[:2]
+        # Keep punctuation/words; alter only order. Exclude ambiguous identical sentences.
+        a, b = target[:first].strip(), target[first:second].strip()
+        if a != b and min(len(a.split()), len(b.split())) >= 5 and not any(quote in target for quote in ('"', '\u201c', '\u201d')):
+            leading = target[:len(target)-len(target.lstrip())]
+            alternatives.append(('order', leading+b+' '+a+target[second:]))
+    return [(kind, text) for kind, text in alternatives if text != target]
+
+
+def build_continuity_pairs(dataset, tokenizer, per_book=128, seed=42):
+    """Freeze exact sentence-bounded positives from ONLY the supplied book split.
+
+    Prefixes contain 48..160 original tokens; targets contain 24..96 original
+    tokens and end at a sentence boundary. No positive text is rewritten.
+    """
+    from bisect import bisect_right
+    records = []
+    for book_id, array in zip(dataset.book_ids, dataset.books):
+        ids = array.tolist()
+        if ids and ids[0] == tokenizer.eos_token_id:
+            ids = ids[1:]
+        if ids and ids[-1] == tokenizer.eos_token_id:
+            ids = ids[:-1]
+        text = tokenizer.decode(ids, clean_up_tokenization_spaces=False)
+        verbs = r'(?:said|asked|answered|replied|whispered|exclaimed|cried)'
+        person_names = set(re.findall(r'\b([A-Z][a-z]{2,})\s+'+verbs+r'\b', text))
+        person_names.update(re.findall(r'\b'+verbs+r'\s+([A-Z][a-z]{2,})\b', text))
+        encoded = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True, verbose=False)
+        if encoded['input_ids'] != ids:
+            raise ValueError(f'Continuity source does not round-trip: {book_id}')
+        ends = [span[1] for span in encoded['offset_mapping']]
+        boundaries = sorted(set([0]+[bisect_right(ends, end) for end in prose_sentence_ends(text)]))
+        rng = random.Random(f'{seed}:{book_id}:continuity-v1')
+        indices = list(range(1, len(boundaries)-1))
+        rng.shuffle(indices)
+        accepted = 0
+        for j in indices:
+            start = boundaries[j]
+            beginnings = [b for b in boundaries[max(0, j-8):j] if 48 <= start-b <= 160]
+            endings = [b for b in boundaries[j+1:j+5] if 24 <= b-start <= 96]
+            if not beginnings or not endings:
+                continue
+            begin = min(beginnings, key=lambda b: abs(start-b-112))
+            end = min(endings, key=lambda b: abs(b-start-64))
+            prefix_ids, chosen = ids[begin:start], ids[start:end]
+            prefix = tokenizer.decode(prefix_ids, clean_up_tokenization_spaces=False)
+            target = tokenizer.decode(chosen, clean_up_tokenization_spaces=False)
+            if re.search(r'^\s*(?:CHAPTER|BOOK|PART)\b|^[A-Z][A-Z ]{12,}$', prefix+target, re.M):
+                continue
+            alternatives = continuity_corruptions(prefix, target, person_names)
+            # Balance available corruption types rather than always favoring negation.
+            rng.shuffle(alternatives)
+            for kind, negative in alternatives:
+                rejected = tokenizer.encode(negative, add_special_tokens=False)
+                common = next((i for i, (a, b) in enumerate(zip(chosen, rejected)) if a != b),
+                              min(len(chosen), len(rejected)))
+                if common >= min(len(chosen), len(rejected)) or len(prefix_ids)+len(rejected) > 288:
+                    continue
+                record = {'book_id': book_id, 'start_token': begin+1, 'target_start_token': start+1,
+                          'end_token': end+1, 'prefix_ids': prefix_ids, 'chosen_ids': chosen,
+                          'rejected_ids': rejected, 'difference_start': common,
+                          'kind': kind.split(':')[0], 'variant': kind}
+                record['pair_id'] = hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()[:20]
+                records.append(record)
+                accepted += 1
+                break
+            if accepted >= per_book:
+                break
+    # Otherwise insertion negatives dominate and reward globally suppressing "not".
+    polarities = {v: [r for r in records if r['variant'] == v]
+                  for v in ('polarity:add_not', 'polarity:remove_not')}
+    balanced_count = min(map(len, polarities.values()))
+    kept = {r['pair_id'] for group in polarities.values() for r in group[:balanced_count]}
+    return [r for r in records if r['kind'] != 'polarity' or r['pair_id'] in kept]
+
+
+def continuity_preference_loss(model, pairs, pad_id, beta=2., margin=.2):
+    """Rank changed spans; separately anchor ALL original continuation tokens.
+
+    Scoring at most 32 tokens after the first difference avoids diluting a
+    changed name/event across an otherwise identical long passage. No reference
+    model, external weights, generated positive story, or auxiliary export head.
+    """
+    import torch
+    import torch.nn.functional as F
+    if not pairs:
+        zero = next(model.parameters()).new_zeros(())
+        return zero, zero, {'pairs': 0, 'wins': 0., 'gap_sum': 0.}
+    rows, start_offsets = [], []
+    for pair in pairs:
+        prefix = pair['prefix_ids']
+        for key in ('chosen_ids', 'rejected_ids'):
+            suffix = pair[key]
+            rows.append({'input_ids': prefix+suffix, 'labels': [-100]*len(prefix)+suffix})
+            start_offsets.append(len(prefix)+pair['difference_start'])
+    batch = CausalCollator(pad_id)(rows)
+    batch = {k: v.to(model.device) for k, v in batch.items()}
+    was_training = model.training
+    model.eval()  # Keep dropout from deciding a minimal-pair comparison; keep gradients.
+    try:
+        logits = model(batch['input_ids'], attention_mask=batch['attention_mask'], use_cache=False).logits
+        targets = batch['labels'][:, 1:]
+        token_losses = F.cross_entropy(logits[:, :-1].float().transpose(1, 2), targets,
+                                       reduction='none', ignore_index=-100)
+        full_counts = targets.ne(-100).sum(-1)
+        positive = (token_losses.sum(-1)/full_counts.clamp_min(1))[::2].mean()
+        masks = torch.zeros_like(targets, dtype=torch.bool)
+        for i, start in enumerate(start_offsets):
+            masks[i, start-1:start-1+32] = True
+        masks &= targets.ne(-100)
+        nll = (token_losses.mul(masks).sum(-1)/masks.sum(-1).clamp_min(1)).reshape(-1, 2)
+        gap = nll[:, 1]-nll[:, 0]
+        preference = F.softplus(beta*(margin-gap)).mean()
+        return preference, positive, {'pairs': len(pairs), 'wins': float(gap.detach().gt(0).sum()),
+                                     'gap_sum': float(gap.detach().sum())}
+    finally:
+        model.train(was_training)
+
+
+def score_continuity_pairs(model, pairs, pad_id, batch_size=8):
+    import torch
+    totals = defaultdict(lambda: defaultdict(float))
+    with torch.inference_mode():
+        for kind in sorted({p['kind'] for p in pairs}):
+            subset = [p for p in pairs if p['kind'] == kind]
+            for start in range(0, len(subset), batch_size):
+                batch = subset[start:start+batch_size]
+                _, positive, stats = continuity_preference_loss(model, batch, pad_id)
+                for key in ('all', kind):
+                    for metric, value in stats.items():
+                        totals[key][metric] += value
+                    totals[key]['positive_nll_sum'] += float(positive)*len(batch)
+    return {kind: {'pairs': int(s['pairs']), 'preference_accuracy': s['wins']/s['pairs'],
+                   'mean_gap_nll': s['gap_sum']/s['pairs'], 'positive_nll': s['positive_nll_sum']/s['pairs']}
+            for kind, s in totals.items()}
+
+
+def reference_preference_loss(model, reference, pair, pad_id, beta=2.):
+    """Prefer source over a model rollout relative to frozen starting weights.
+
+    Length-normalized log ratios avoid rewarding a mere change in response
+    length. This is a DPO-style objective; source preference is not a claim that
+    every different continuation is semantically wrong.
+    """
+    import torch
+    import torch.nn.functional as F
+    prefix = pair['prefix_ids']
+    rows = [{'input_ids': prefix+pair[key], 'labels': [-100]*len(prefix)+pair[key]}
+            for key in ('chosen_ids', 'rejected_ids')]
+    batch = {k: v.to(model.device) for k, v in CausalCollator(pad_id)(rows).items()}
+    was_training = model.training
+    model.eval()
+    reference.eval()
+    try:
+        def gap(network):
+            logits = network(batch['input_ids'], attention_mask=batch['attention_mask'], use_cache=False).logits
+            sums = loss_sums(logits, batch['labels'])
+            nll = sums[:, 0]/sums[:, 1].clamp_min(1)
+            return nll[1]-nll[0]
+        with torch.no_grad():
+            anchor = gap(reference)
+        advantage = gap(model)-anchor
+        return F.softplus(-beta*advantage), float(advantage.detach())
+    finally:
+        model.train(was_training)
+
+
+def online_continuity_loss(trainer, model, pairs):
+    """Mine a fresh training-only rollout; never use generated prose as positive."""
+    if not pairs:
+        return next(model.parameters()).new_zeros(()), 0, 0.
+    cfg, step = trainer.coherence_config, trainer.state.global_step
+    pair = pairs[(step//cfg['online_every']) % len(pairs)]
+    mode = 'sample' if (step//cfg['online_every']) % 2 else 'greedy'
+    budget = min(cfg['online_tokens'], len(pair['chosen_ids']))
+    prompt = {'input_ids': pair['prefix_ids'], 'prompt': ''}
+    tokenizer = trainer.processing_class
+    if tokenizer is None:
+        from types import SimpleNamespace
+        tokenizer = SimpleNamespace(eos_token_id=model.config.eos_token_id, pad_token_id=model.config.pad_token_id,
+                                    decode=lambda ids, **kwargs: '')  # Mining only needs original token IDs.
+    sample, = generate_samples(model, tokenizer, [prompt], budget,
+                               seed=trainer.args.seed+step, modes=(mode,), include_token_ids=True)
+    rejected = sample['token_ids']
+    chosen = pair['chosen_ids'][:budget]
+    if not rejected or chosen == rejected:
+        return next(model.parameters()).new_zeros(()), 0, 0.
+    mined = {**pair, 'chosen_ids': chosen, 'rejected_ids': rejected}
+    loss, advantage = reference_preference_loss(model, trainer.continuity_reference, mined,
+                                                model.config.pad_token_id, cfg['online_beta'])
+    # Small auditable sample; avoid filling Colab storage with every rollout.
+    if step % (cfg['online_every']*25) == 0:
+        record = {'step': step, 'book_id': pair['book_id'], 'mode': mode,
+                  'prefix_ids': pair['prefix_ids'], 'chosen_ids': chosen, 'rejected_ids': rejected,
+                  'reference_relative_gap': advantage}
+        with (Path(trainer.args.output_dir)/'online_negatives.jsonl').open('a', encoding='utf-8') as handle:
+            handle.write(json.dumps(record)+'\n')
+    return loss, 1, advantage
+
+
 class CoherenceDataset:
     """Annotate original windows; no fabricated positive text or removed books."""
-    def __init__(self, base, tokenizer):
+    def __init__(self, base, tokenizer, continuity_pairs=None):
         self.base, self.tokenizer = base, tokenizer
         self.block_size, self.random_offsets = base.block_size, base.random_offsets
+        self.continuity = defaultdict(list)
+        for pair in continuity_pairs or []:
+            self.continuity[str(pair['book_id'])].append(pair)
 
     @property
     def epoch(self):
@@ -1534,7 +1773,12 @@ class CoherenceDataset:
         book, _ = dataset.windows[window]
         key = int.from_bytes(hashlib.sha256(dataset.book_ids[book].encode()).digest()[:7], 'big')
         text = self.tokenizer.decode(row['input_ids'], skip_special_tokens=True)
-        return {**row, 'book_key': key, 'pool': pool, 'simplicity': passage_simplicity(text)}
+        result = {**row, 'book_key': key, 'pool': pool, 'simplicity': passage_simplicity(text)}
+        candidates = self.continuity.get(dataset.book_ids[book], [])
+        if candidates:
+            # Deterministic indexed rotation survives restored epochs/loader skips.
+            result['continuity_pair'] = candidates[(index+self.epoch*104729) % len(candidates)]
+        return result
 
 
 def curriculum_weights(simplicity, pools, counts, progress, fraction):
@@ -1626,7 +1870,7 @@ def repetition_unlikelihood(model, inputs, attention_mask, tokens=64):
 def coherence_loss(trainer, model, inputs, num_items_in_batch=None, return_outputs=False):
     import torch
     cfg = trainer.coherence_config
-    batch = {k: v for k, v in inputs.items() if k not in {'simplicity', 'book_key', 'pool'}}
+    batch = {k: v for k, v in inputs.items() if k not in {'simplicity', 'book_key', 'pool', 'continuity_pairs'}}
     outputs = model(**{k: v for k, v in batch.items() if k != 'labels'}, use_cache=False)
     sums = loss_sums(outputs.logits, batch['labels'])
     counts = sums[:, 1].detach()
@@ -1638,6 +1882,12 @@ def coherence_loss(trainer, model, inputs, num_items_in_batch=None, return_outpu
     contrast, pairs = context_pair_loss(model, batch['input_ids'], batch['labels'], inputs['book_key'],
                                        cfg['context_margin']) if cfg['context_weight'] else (loss.new_zeros(()), 0)
     loss = loss+cfg['context_weight']*contrast*counts.sum()/denominator
+    preference, positive, pair_stats = loss.new_zeros(()), loss.new_zeros(()), {'pairs': 0, 'wins': 0., 'gap_sum': 0.}
+    if cfg.get('continuity_weight', 0):
+        local_pairs = inputs.get('continuity_pairs', [])[:cfg['continuity_pairs_per_batch']]
+        preference, positive, pair_stats = continuity_preference_loss(
+            model, local_pairs, model.config.pad_token_id, cfg['continuity_beta'], cfg['continuity_margin'])
+        loss = loss+(cfg['continuity_weight']*preference+cfg['continuity_positive_weight']*positive)*counts.sum()/denominator
     ul, negatives = loss.new_zeros(()), 0
     step = trainer.state.global_step
     # Exactly once per optimizer step, including after an optimizer-boundary resume.
@@ -1645,6 +1895,12 @@ def coherence_loss(trainer, model, inputs, num_items_in_batch=None, return_outpu
         trainer._ul_step = step
         ul, negatives = repetition_unlikelihood(model, batch['input_ids'], batch['attention_mask'], cfg['unlikelihood_tokens'])
         loss = loss+cfg['unlikelihood_weight']*ul
+    online, online_pairs, advantage = loss.new_zeros(()), 0, 0.
+    if (cfg.get('online_weight', 0) and inputs.get('continuity_pairs')
+            and step % cfg['online_every'] == 0 and trainer._online_step != step):
+        trainer._online_step = step
+        online, online_pairs, advantage = online_continuity_loss(trainer, model, inputs.get('continuity_pairs', []))
+        loss = loss+cfg['online_weight']*online  # Once per update, not once per microbatch.
     stats = trainer.coherence_stats
     stats['ce_sum'] += float(sums[:, 0].detach().sum())
     stats['tokens'] += float(counts.sum())
@@ -1652,6 +1908,13 @@ def coherence_loss(trainer, model, inputs, num_items_in_batch=None, return_outpu
     stats['pairs'] += pairs
     stats['ul_sum'] += float(ul.detach())*negatives
     stats['negatives'] += negatives
+    stats['continuity_loss'] += float(preference.detach())*pair_stats['pairs']
+    stats['continuity_positive_nll'] += float(positive.detach())*pair_stats['pairs']
+    for key, value in pair_stats.items():
+        stats['continuity_'+key] += value
+    stats['online_loss'] += float(online.detach())*online_pairs
+    stats['online_pairs'] += online_pairs
+    stats['online_advantage'] += advantage
     return (loss, outputs) if return_outputs else loss
 
 
@@ -1678,6 +1941,13 @@ def training_trainer(*args, **kwargs):
             super().__init__(*args, **kwargs)
             self.coherence_config = coherence_config
             self.coherence_stats, self._ul_step = defaultdict(float), -1
+            self._online_step = -1
+            self.continuity_reference = None
+            if coherence_config and coherence_config.get('online_weight', 0):
+                import copy
+                # Created before Trainer loads resumed optimizer/student weights:
+                # the caller supplies the same frozen starting model on every resume.
+                self.continuity_reference = copy.deepcopy(self.model).eval().requires_grad_(False)
             if coherence_config:
                 # Our CE and per-microbatch margin use the accumulation-wide token denominator.
                 self.model_accepts_loss_kwargs = True
@@ -1685,16 +1955,26 @@ def training_trainer(*args, **kwargs):
         def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
             if self.coherence_config and model.training:
                 return coherence_loss(self, model, inputs, num_items_in_batch, return_outputs)
-            clean = {k: v for k, v in inputs.items() if k not in {'simplicity', 'book_key', 'pool'}}
+            clean = {k: v for k, v in inputs.items() if k not in {'simplicity', 'book_key', 'pool', 'continuity_pairs'}}
             return super().compute_loss(model, clean, return_outputs, num_items_in_batch)
 
         def log(self, logs, start_time=None):
-            if self.coherence_config and ('loss' in logs or 'train_loss' in logs):
+            if self.coherence_config and self.coherence_stats['tokens'] and ('loss' in logs or 'train_loss' in logs):
                 s = self.coherence_stats
                 logs = {**logs, 'ce_nll': s['ce_sum']/max(1, s['tokens']),
                         'context_margin_loss': s['context_sum']/max(1, s['pairs']),
                         'context_pairs': s['pairs'], 'unlikelihood_loss': s['ul_sum']/max(1, s['negatives']),
                         'unlikelihood_negative_tokens': s['negatives']}
+                if self.coherence_config.get('continuity_weight', 0):
+                    logs.update(continuity_pairs=s['continuity_pairs'],
+                        continuity_loss=s['continuity_loss']/max(1, s['continuity_pairs']),
+                        continuity_positive_nll=s['continuity_positive_nll']/max(1, s['continuity_pairs']),
+                        continuity_accuracy=s['continuity_wins']/max(1, s['continuity_pairs']),
+                        continuity_gap=s['continuity_gap_sum']/max(1, s['continuity_pairs']))
+                if self.coherence_config.get('online_weight', 0):
+                    logs.update(online_preference_pairs=s['online_pairs'],
+                        online_preference_loss=s['online_loss']/max(1, s['online_pairs']),
+                        online_reference_relative_gap=s['online_advantage']/max(1, s['online_pairs']))
                 self.coherence_stats = defaultdict(float)
             return super().log(logs, start_time)
 
@@ -1806,6 +2086,7 @@ class CoherenceCollator(CausalCollator):
         batch['simplicity'] = torch.tensor([r.get('simplicity', 1.) for r in examples])
         batch['book_key'] = torch.tensor([r.get('book_key', 0) for r in examples])
         batch['pool'] = torch.tensor([r.get('pool', 0) for r in examples])
+        batch['continuity_pairs'] = [r['continuity_pair'] for r in examples if 'continuity_pair' in r]
         return batch
 
 
@@ -1920,6 +2201,11 @@ def generate_samples(model, tokenizer, prompts, max_new_tokens=96, seed=1234,
         if mps_state is not None:
             torch.mps.set_rng_state(mps_state)
     return results
+
+
+def print_sample(sample, label=None):
+    tag = f"{label} | {sample['mode']}" if label else sample['mode']
+    print(f"\n[{tag}]\nPROMPT:\n{sample['prompt']}\n\nGENERATED:\n{sample['continuation']}\n", flush=True)
 
 
 def dataset_signature(data):
@@ -2205,7 +2491,7 @@ def training(args):
         if winter_recipe["treatment"]:
             train_set = WinterReplayDataset(train_set, supplementary, args.seed)
     if coherence_config:
-        train_set = CoherenceDataset(train_set, tokenizer)
+        train_set = CoherenceDataset(train_set, tokenizer, getattr(args, 'continuity_pairs', None))
     val_set = BookWindows(data / "validation.jsonl", 512 if coherence_config else args.block_size, args.eval_limit)
     effective_batch = args.batch_size * args.accumulation
     origin = "Continued" if continuation is not None else "Random"
@@ -2227,8 +2513,7 @@ def training(args):
                 with (out / "samples.jsonl").open("a", encoding="utf-8") as handle:
                     for sample in samples:
                         handle.write(json.dumps({"step": state.global_step, **sample}, ensure_ascii=False) + "\n")
-                        print(f"\n[step {state.global_step} | {sample['mode']}] "
-                              f"{sample['prompt']}{sample['continuation']}\n", flush=True)
+                        print_sample(sample, f'step {state.global_step}')
 
     training_args = TrainingArguments(
         output_dir=str(out), num_train_epochs=args.epochs, max_steps=args.max_steps,
@@ -2508,7 +2793,7 @@ def training_exposure(dataset, effective_batch, steps, seed):
     import torch
     if isinstance(dataset, CoherenceDataset):
         result = training_exposure(dataset.base, effective_batch, steps, seed)
-        result['target_count_scope'] = 'Positive source-token CE only; auxiliary negatives and curriculum weights excluded.'
+        result['target_count_scope'] = 'Replay CE labels only; auxiliary positive/negative forwards and curriculum weights excluded.'
         return result
     if isinstance(dataset, (SceneReplayDataset, WinterReplayDataset)):
         return dataset.exposure(effective_batch, steps, seed)
@@ -2810,6 +3095,9 @@ def run_capacity_review(model, tokenizer, benchmark, training_data, destination,
               "copy_reference_scope": getattr(training_data, "copy_reference_scope", "Original training books"),
               "review_rubric": {"0": "clear failure", "1": "mixed or uncertain", "2": "sustained success"},
               "acceptance": "Manual review required; loss, low repetition, and copying are not coherence scores."}
+    if benchmark.get('continuity_pairs'):
+        report['continuity_preferences'] = score_continuity_pairs(
+            model, benchmark['continuity_pairs'], tokenizer.pad_token_id)
     write_coherence_sheet(destination / "review.csv", results)
     if short_results:
         report["short_samples"] = short_results
@@ -2818,7 +3106,7 @@ def run_capacity_review(model, tokenizer, benchmark, training_data, destination,
     atomic_json(destination / "coherence.json", report)  # Completion marker written last.
     print(f"\n[coherence | step {step}] {len(results)} continuations: {destination / 'coherence.json'}", flush=True)
     for result in results[:2]:
-        print(f"[seed {result['seed']}] {result['prompt']}{result['continuation']}\n", flush=True)
+        print_sample(result, f"seed {result['seed']}")
     return report
 
 
@@ -3701,11 +3989,17 @@ def default_winter_source(root):
 
 
 def coherence_settings(args):
-    return {'version': 1, 'positions': args.coherence_context,
+    config = {'version': 1, 'positions': args.coherence_context,
             'curriculum_fraction': args.curriculum_fraction,
             'context_weight': args.context_loss_weight, 'context_margin': args.context_margin,
             'unlikelihood_weight': args.unlikelihood_weight, 'unlikelihood_every': args.unlikelihood_every,
             'unlikelihood_tokens': args.unlikelihood_tokens, 'rerank_candidates': args.rerank_candidates}
+    if args.command == 'train-continuity':
+        config.update(version=2, continuity_weight=args.continuity_weight,
+            continuity_positive_weight=.5, continuity_beta=2., continuity_margin=.2,
+            continuity_pairs_per_batch=2, continuity_pair_version=1,
+            online_weight=args.online_preference_weight, online_every=2, online_tokens=64, online_beta=2.)
+    return config
 
 
 def finetune_winter(args):
@@ -3714,7 +4008,8 @@ def finetune_winter(args):
     import os
     import torch
     from transformers import AutoTokenizer, GPT2Config, GPT2LMHeadModel, set_seed
-    coherence = coherence_settings(args) if args.command == 'train-coherence' else None
+    continuity = args.command == 'train-continuity'
+    coherence = coherence_settings(args) if args.command in {'train-coherence', 'train-continuity'} else None
 
     if args.corpus or args.rebuild or args.grow_layers or args.continuation_dropout is not None:
         raise ValueError("Winter/coherence continuation fixes its source catalog, tokenizer, blocks and inherited dropout")
@@ -3739,6 +4034,11 @@ def finetune_winter(args):
     tokenizer = AutoTokenizer.from_pretrained(data/"tokenizer", local_files_only=True)
     latest = ROOT/'runs/christmas-winter-v2/expanded/best'
     default_source = latest if coherence and latest.is_dir() else default_winter_source(ROOT)
+    if continuity:
+        for candidate in (ROOT/'runs/christmas-coherence/expanded/last', ROOT/'runs/christmas-coherence/expanded/best'):
+            if candidate.is_dir():
+                default_source = candidate
+                break
     source = Path(args.continue_from or default_source).resolve()
     snapshot, material = out/"starting_model", out/"material"
     if out.resolve() == source or out.resolve() in source.parents:
@@ -3746,6 +4046,8 @@ def finetune_winter(args):
     if args.resume:
         prior = json.loads((out/"experiment.json").read_text())
         model = load_continuation(snapshot, tokenizer, signature)
+        if continuity and coherence['positions'] is None:
+            coherence['positions'] = model.config.n_positions
         source_description = prior["source"]
         manifest = json.loads((material/"supplementary_sources.json").read_text())
         encoded = (material/"train.jsonl").read_text()
@@ -3781,6 +4083,8 @@ def finetune_winter(args):
             raise ValueError("The reviewed winter experiment requires a context-512 project checkpoint")
         if coherence:
             previous = model
+            if coherence['positions'] is None:
+                coherence['positions'] = previous.config.n_positions
             model, extension = extend_gpt2_context(previous, coherence['positions'])
             if extension['changed']:
                 extension['verification'] = verify_depth_growth(previous, model, tokenizer)
@@ -3790,6 +4094,30 @@ def finetune_winter(args):
         manifest, encoded = prepare_winter_material(
             data, Path(args.winter_cache or data.parent/"winter-data"), tokenizer, signature, args.offline)
     args.block_size = model.config.n_positions
+    pair_records = None
+    validation_pairs = None
+    if continuity:
+        if args.resume:
+            pair_records = json.loads((material/'continuity_train.json').read_text())
+            validation_pairs = json.loads((material/'continuity_validation.json').read_text())
+        else:
+            # Build directly from token arrays; do not touch the held-out test books.
+            original = BookWindows(data/'train.jsonl', 512)
+            extra_rows = [json.loads(line) for line in encoded.splitlines()]
+            import numpy as np
+            from types import SimpleNamespace
+            extra = SimpleNamespace(book_ids=[str(row['id']) for row in extra_rows],
+                                    books=[np.asarray(row['ids'], dtype=np.int32) for row in extra_rows])
+            pair_records = build_continuity_pairs(original, tokenizer, seed=args.seed)
+            pair_records += build_continuity_pairs(extra, tokenizer, seed=args.seed)
+            validation_pairs = build_continuity_pairs(BookWindows(data/'validation.jsonl', 512), tokenizer,
+                                                       per_book=12, seed=args.seed+1)
+        if not pair_records or not validation_pairs:
+            raise ValueError('No sentence-bounded continuity pairs; inspect prepared text/tokenizer')
+        coherence['training_pairs_sha256'] = json_digest(pair_records)
+        coherence['validation_pairs_sha256'] = json_digest(validation_pairs)
+        print(f'Continuity supervision: {len(pair_records):,} training pairs, '
+              f'{len(validation_pairs):,} validation-only pairs.', flush=True)
     digest = hashlib.sha256()
     for name, tensor in sorted(model.state_dict().items()):
         digest.update(f"{name}:{tensor.dtype}:{list(tensor.shape)}".encode())
@@ -3808,6 +4136,8 @@ def finetune_winter(args):
     benchmark["context_probe_version"] = 1
     if coherence:
         benchmark['reranked_prompts'] = 1 if args.smoke_test else min(3, args.benchmark_prompts)
+    if continuity:
+        benchmark['continuity_pairs'] = validation_pairs[:4] if args.smoke_test else validation_pairs
     if args.smoke_test:
         benchmark["training_eval_windows"] = 16
     recipe = {"version": 2, "manifest_sha256": json_digest(manifest),
@@ -3865,12 +4195,34 @@ def finetune_winter(args):
                          'Auxiliary forwards/greedy mining add compute. Settings are hypotheses, not measured optima.',
             control='Optional original-corpus-only branch; all five methods also apply to that branch. '
                     'It isolates supplementary material, not the new objectives; budgets are not compute-matched.')
+    if continuity:
+        plan['rationale'].update(
+            continuity='Original sentence-bounded continuations are positive. Negatives alter a name, auxiliary '
+                       'polarity, or sentence order in that same passage. These are automatic corruptions, '
+                       'not human correctness labels. Pairwise softplus on up to 32 tokens after the first '
+                       'difference, beta 2, gap margin .2, weight .5; positive continuation CE weight .5. '
+                       'All source replay CE remains. At most two pairs per microbatch. Validation books '
+                       'produce evaluation pairs only; no test-book preference examples.',
+            online_preferences='Every two optimizer updates, generate up to 64 tokens from one training prefix, '
+                               'alternating greedy and sampled rollouts. Prefer the actual source continuation '
+                               'using length-normalized DPO-style log ratios against a frozen copy of this '
+                               'project starting model (beta 2, weight .5). Generated prose is never positive. '
+                               'A different continuation is not automatically incorrect; this is a preference '
+                               'for the observed source. This objective uses no outside model or annotations. '
+                               'Mining preserves RNG streams and runs once per scheduled optimizer update.',
+            context='Inherit the source context unless explicitly overridden. Keep validation windows at 512.',
+            optimization='Default 1500 updates, LR 2e-5, batch 4 x accumulation 4, inherited dropout, '
+                         '3% warmup and cosine decay. Disable simplicity weighting and other-book prefix '
+                         'ranking by default; concentrate auxiliary supervision on local continuation choices.')
     if args.resume:
         if prior != plan or json.loads((out/"benchmark.json").read_text()) != benchmark:
             raise ValueError("Frozen winter settings, source weights, material or benchmark changed")
     else:
         material.mkdir(parents=True, exist_ok=True)
         (material/"train.jsonl").write_text(encoded)
+        if continuity:
+            atomic_json(material/'continuity_train.json', pair_records)
+            atomic_json(material/'continuity_validation.json', validation_pairs)
         atomic_json(material/"supplementary_sources.json", manifest)
         model.save_pretrained(snapshot, safe_serialization=True)
         tokenizer.save_pretrained(snapshot)
@@ -3903,6 +4255,9 @@ def finetune_winter(args):
         branch.capacity_benchmark, branch.benchmark_sha256 = benchmark, json_digest(benchmark)
         branch.winter_recipe = {**recipe, "treatment": name == "expanded"}
         branch.winter_train_path, branch.winter_manifest = str(material/"train.jsonl"), manifest
+        if continuity:
+            allowed = {json.loads(line)['id'] for line in (data/'train.jsonl').read_text().splitlines()}
+            branch.continuity_pairs = pair_records if name == 'expanded' else [p for p in pair_records if p['book_id'] in allowed]
         branch.resume = "latest" if args.resume and (out/name/"run_config.json").exists() else None
         if branch.resume and latest_complete_checkpoint(out/name, require_scaler=args.precision == "fp16"):
             branch.continue_from = None
@@ -3968,8 +4323,7 @@ def finetune_winter(args):
                 f'Final optimizer step: {args.max_steps}. This is not a coherence-selected winner. '
                 'Original Christmas stories and approved winter selections; project weights and tokenizer only. '
                 'The base model was randomly initialized. See training_summary.json and supplementary_sources.json.\n\n'
-                'Training adds a simplicity curriculum, context ranking and generated-repetition unlikelihood; '
-                'the saved GPT-2 context has been trained at the configured length. '
+                'The training_summary.json records the active auxiliary objectives and context length. '
                 'Candidate reranking is inference code in model.py; GGUF contains weights only. '
                 'Other inference engines do not automatically apply this reranker.\n', encoding='utf-8')
         print(f"Final trained weights: {out/'expanded/last'}; best/ remains selected by validation NLL.", flush=True)
@@ -4212,8 +4566,9 @@ def inference(args):
         modes = ("greedy", "sample") if args.decode_mode == "both" else (args.decode_mode,)
         if args.decode_mode == 'both' and getattr(model.config, 'coherence_decoding', None):
             modes += ('reranked',)
+        print(f'Model: {path.resolve()} ({model.num_parameters():,} parameters)', flush=True)
         for sample in generate_samples(model, tokenizer, [args.prompt], args.sample_tokens, args.seed, modes=modes):
-            print(f"\n[{sample['mode']}] {sample['prompt']}{sample['continuation']}")
+            print_sample(sample)
         return
     summary = json.loads((path / "training_summary.json").read_text())
     if summary["dataset_sha256"] != dataset_signature(args.data_dir):
@@ -4231,7 +4586,7 @@ def inference(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["prepare", "train", "train-coherence", "finetune-winter", "finetune-scenes", "compare-capacity", "compare-dropout", "compare-windowing", "compare-depth", "diagnose",
+    parser.add_argument("command", choices=["prepare", "train", "train-continuity", "train-coherence", "finetune-winter", "finetune-scenes", "compare-capacity", "compare-dropout", "compare-windowing", "compare-depth", "diagnose",
                                             "compare-decoding", "evaluate", "generate"])
     parser.add_argument("--corpus", help="Optional subset of the embedded Christmas URLs, as a Python sources list")
     parser.add_argument("--data-dir", default=str(ROOT / "data"))
@@ -4290,11 +4645,15 @@ def main(argv=None):
     parser.add_argument("--winter-cache", help="Winter source download cache; defaults to winter-data beside --data-dir")
     parser.add_argument("--winter-lookback", type=int,
                         help="finetune-winter: preceding context tokens without duplicate loss (default 128; 0 for ablation)")
-    parser.add_argument('--coherence-context', type=int, choices=[512, 1024], default=1024,
-                        help='train-coherence: trained context extension; 512 disables extension')
-    parser.add_argument('--curriculum-fraction', type=float, default=.4,
+    parser.add_argument('--coherence-context', type=int, choices=[512, 1024],
+                        help='train-coherence: default 1024; train-continuity: inherit source context')
+    parser.add_argument('--continuity-weight', type=float, default=.5,
+                        help='train-continuity: same-passage preference loss weight, default 0.5')
+    parser.add_argument('--online-preference-weight', type=float, default=.5,
+                        help='train-continuity: source-vs-model rollout preference weight; 0 disables')
+    parser.add_argument('--curriculum-fraction', type=float,
                         help='train-coherence: fraction of updates to anneal simplicity weights; 0 disables')
-    parser.add_argument('--context-loss-weight', type=float, default=.1,
+    parser.add_argument('--context-loss-weight', type=float,
                         help='train-coherence: true-vs-unrelated-context loss weight; 0 disables')
     parser.add_argument('--context-margin', type=float, default=.2)
     parser.add_argument('--unlikelihood-weight', type=float, default=.1,
@@ -4313,22 +4672,32 @@ def main(argv=None):
                         choices=["both", "greedy", "sample", "blocked_sample", "contrastive", "reranked"],
                         help="Decoding method for generate; both preserves the original greedy/sample output")
     args = parser.parse_args(argv)
-    coherence = args.command == 'train-coherence'
+    continuity = args.command == 'train-continuity'
+    coherence = args.command in {'train-coherence', 'train-continuity'}
     capacity = args.command == "compare-capacity"
     scenes = args.command == "finetune-scenes"
-    winter = args.command in {'finetune-winter', 'train-coherence'}
+    winter = args.command in {'finetune-winter', 'train-coherence', 'train-continuity'}
+    if args.curriculum_fraction is None:
+        args.curriculum_fraction = 0. if continuity else .4
+    if args.context_loss_weight is None:
+        args.context_loss_weight = 0. if continuity else .1
+    if args.coherence_context is None and not continuity:
+        args.coherence_context = 1024
     if args.batch_size is None:
         args.batch_size = 4 if coherence else 8
     if coherence:
-        args.block_size = args.coherence_context
+        args.block_size = args.coherence_context or 512
         if args.output_dir is None:
-            args.output_dir = str(ROOT/'runs/christmas-coherence')
+            args.output_dir = str(ROOT/('runs/christmas-continuity' if continuity else 'runs/christmas-coherence'))
         if args.learning_rate is None:
-            args.learning_rate = 3e-5
+            args.learning_rate = 2e-5 if continuity else 3e-5
+        if continuity and args.max_steps is None:
+            args.max_steps = 1500
         if args.winter_lookback is None:
             args.winter_lookback = 256 if args.coherence_context == 1024 else 128
         args.rerank_candidates = 8 if args.rerank_candidates is None else args.rerank_candidates
-    if (not 0 <= args.curriculum_fraction <= 1 or not 0 <= args.context_loss_weight <= 1
+    if (not 0 <= args.online_preference_weight <= 2 or not 0 <= args.continuity_weight <= 2
+            or not 0 <= args.curriculum_fraction <= 1 or not 0 <= args.context_loss_weight <= 1
             or not 0 <= args.unlikelihood_weight <= 1 or not 0 <= args.context_margin <= 2
             or args.unlikelihood_every < 1 or not 8 <= args.unlikelihood_tokens <= 256
             or (args.rerank_candidates is not None and not 1 <= args.rerank_candidates <= 16)):
@@ -4404,7 +4773,7 @@ def main(argv=None):
         training(args)
     elif args.command == "finetune-scenes":
         finetune_scenes(args)
-    elif args.command in {'finetune-winter', 'train-coherence'}:
+    elif args.command in {'finetune-winter', 'train-coherence', 'train-continuity'}:
         finetune_winter(args)
     elif args.command == "compare-capacity":
         compare_capacity(args)
