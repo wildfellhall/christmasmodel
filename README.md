@@ -2,6 +2,8 @@
 
 Train a small literary continuation model **from random weights** on the Christmas and winter books listed directly in `model.py` and also in `corpus.py`. `model.py` downloads and cleans the books, learns a tokenizer, trains a `GPT2LMHeadModel(GPT2Config(...))`, prints checkpoint samples, and evaluates the best validation checkpoint on held-out books. `export.py` saves a Hugging Face package and converts the weights to GGUF.
 
+**The original Christmas source list is a hard constraint.** Training uses only these books. No supplementary corpus, externally generated training stories, or pretrained weights are used. Source-list overrides are limited to subsets of the original URLs.
+
 ## Corpus findings and model choice
 
 The repository contains **189 Gutenberg URLs**, not an embedded text corpus. All 189 downloaded successfully during the implementation audit. Two alternate editions were removed: 19608 duplicates 10679 (*The Story of the Other Wise Man*), and 17743 duplicates 30907 (*Rosemary*). The remaining 187 books contain **5,119,735 words**. The collection includes overlapping anthologies, short Christmas stories, and longer domestic novels; it is not uniformly Christmas prose.
@@ -57,7 +59,7 @@ Alternatively, use the repository files and run these cells in order:
 !python model.py train
 ```
 
-No pretrained weights or pretrained tokenizer are downloaded. Both notebook and command-line runs use the embedded URLs by default. To use a separate source list explicitly, pass `--corpus path/to/corpus.py`. Existing prepared data and checkpoints from the original source list remain compatible.
+No pretrained weights or pretrained tokenizer are downloaded. Both notebook and command-line runs use the embedded URLs by default. To select a subset of those books explicitly, pass `--corpus path/to/corpus.py`; URLs outside the embedded list are rejected. Existing prepared data and checkpoints from the original source list remain compatible.
 
 Downloads are sequential, cached, and retried. Failed sources are listed in `data/download_failures.json`; preparation stops if fewer than 90% succeed. Use `--min-success-rate 1` to require every URL, `--offline` to require cached downloads, and `--rebuild` to explicitly regenerate prepared data. Missing or changed preparation settings are not silently reused.
 
@@ -144,9 +146,32 @@ NOTEBOOK_ARGS = [
 
 Both branches start independently from the same stage-2 weights and use the same shuffled data, seed, learning-rate schedule, and update budget. `control/` inherits the existing dropout (normally 0.15 embedding/residual and 0.1 attention); `lower-dropout/` uses 0.05 throughout. The override changes the live dropout modules as well as the serialized configuration. Architecture flags do not resize an existing model. Early-stopping patience is raised above the comparison budget so both branches receive the same number of updates.
 
-This uses **1,000 updates in total**, roughly 2.4 passes through the audited training data at the default batch size. It does not evaluate the test set. `comparison.json` contains both validation results and fixed-seed greedy/sampled passages, and each branch retains the starting weights if no new checkpoint improves validation. Examine grammar, repetition, and consistent references across both sets of passages; a small NLL gain alone is insufficient to select a prose-generation recipe. The comparison is unvalidated for prose quality until run on the user's trained stage-2 model.
+This uses **1,000 updates in total**, roughly 2.4 passes through the audited training data at the default batch size. It does not evaluate the test set. `comparison.json` contains both validation results and fixed-seed greedy/sampled passages, and each branch retains the starting weights if no new checkpoint improves validation. Examine grammar, repetition, and consistent references across both sets of passages; a small NLL gain alone is insufficient to select a prose-generation recipe.
+
+The reported 500-update comparison reached validation NLL **3.853164** for inherited dropout and **3.835750** for dropout 0.05, from the same 3.858588 starting point. That is about 1.7% lower validation perplexity for the lower-dropout branch versus control. Both branches still looped under greedy decoding and produced inconsistent sampled scenes. This single paired run supports a modest likelihood improvement; it does not demonstrate a solution to coherence or establish which limitation is responsible.
 
 Use a new output directory for a new paired experiment. To resume an interrupted individual branch, use `train --resume` with that branch's output directory, the same numerical training arguments, `--skip-test`, and the saved patience from its `run_config.json`; omit `--continue-from` and `--continuation-dropout`. After resuming, its results are in that branch's `best/` directory (the parent comparison report is not automatically regenerated). For a single new continuation, `--continuation-dropout` is optional; omitting it preserves the source dropout. `--skip-test` is also available for other development runs.
+
+### Diagnose the existing model before further training
+
+Logged training losses include dropout; validation losses do not. Measure both splits with dropout disabled before using their gap to guide another experiment. The diagnostic uses your saved model and original prepared data, performs no training, and does not evaluate the test set.
+
+Paste the updated `model.py` into a cell with:
+
+```python
+NOTEBOOK_ARGS = [
+    "diagnose",
+    "--model-dir", "/content/runs/christmas-dropout-comparison/lower-dropout/best",
+    "--data-dir", "/content/data",
+    "--output-dir", "/content/runs/christmas-diagnostics",
+]
+```
+
+Use the actual saved paths and a new, empty output directory. No corpus rebuild or additional downloads are needed. The command checks the dataset fingerprint, tokenizer, and source URLs before evaluation. It measures token-weighted NLL/perplexity on up to 1,024 evenly spaced windows per split; with the audited 512-token setup, that covers the whole validation split and a subset of training. Increase `--diagnostic-windows` to include more training windows if needed.
+
+It also prints three deterministic passage probes from each split: a prefix taken directly from a book, its actual next passage, and greedy/sampled continuations. Generation receives only the original prefix token IDs; the reference passage is shown for comparison and is never supplied to generation. Prefixes can begin or end inside words because probes preserve token boundaries. These examples help assess whether familiar training passages behave differently from held-out passages; they are not an automatic coherence score.
+
+The final `DIAGNOSTIC SUMMARY` and `diagnostics.json` record both losses, their gap, and whether input/output weights remain tied. A large gap can motivate investigating generalization; a small gap does not by itself prove insufficient capacity or optimization. Whole-book style differences also affect the gap. Review it alongside the passage probes before choosing another training run. The existing checkpoint and prepared dataset are unchanged.
 
 ## Export weights and download GGUF
 
@@ -219,6 +244,6 @@ python -m pytest -q
 python model.py train --smoke-test --output-dir runs/smoke
 ```
 
-The smoke test uses a tiny CPU model and limited windows; its scores and samples do not measure the full model's quality. Implementation checks cover real-corpus preparation, sixteen regression tests, brief training and continuation runs with the full 13,989,888-parameter/512-context configuration, and checkpoint resumption with identical final weights. Continuation checks cover source-weight identity, data/tokenizer compatibility, retaining the starting weights when validation does not improve, and dropout behavior after reload. A short paired dropout run confirmed identical initial weights and validation scores, equal update counts, and skipped test evaluation. A separate gradient check on unequal-length real-corpus windows matched full-batch and accumulated gradients within 3e-8 in float32 with dropout disabled. Both F16 (28.7 MB) and Q8 (15.8 MB) exports of that configuration loaded in llama.cpp, matched all five tokenizer probes, and matched three greedy first-token predictions against Hugging Face. The full-run quality results above were supplied by the user; no improved prose quality is claimed for the new dropout experiment.
+The smoke test uses a tiny CPU model and limited windows; its scores and samples do not measure the full model's quality. Implementation checks cover real-corpus preparation, regression tests, brief training and continuation runs with the full 13,989,888-parameter/512-context configuration, and checkpoint resumption with identical final weights. Continuation checks cover source-weight identity, data/tokenizer compatibility, retaining the starting weights when validation does not improve, and dropout behavior after reload. A short paired dropout run confirmed identical initial weights and validation scores, equal update counts, and skipped test evaluation. Diagnostic checks cover rejecting outside sources, preserving exact passage tokens, withholding reference continuations from generation, and an evaluation-only run on real-corpus windows. A separate gradient check on unequal-length real-corpus windows matched full-batch and accumulated gradients within 3e-8 in float32 with dropout disabled. Both F16 (28.7 MB) and Q8 (15.8 MB) exports of that configuration loaded in llama.cpp, matched all five tokenizer probes, and matched three greedy first-token predictions against Hugging Face. The full-run quality results above were supplied by the user; no improved prose quality is claimed for the dropout experiment or diagnostic.
 
 The implementation follows the [Transformers GPT-2 interface](https://huggingface.co/docs/transformers/v4.57.6/en/model_doc/gpt2) and [Hugging Face Hub upload API](https://huggingface.co/docs/huggingface_hub/guides/upload). [Poetry50M](https://github.com/wildfellhall/Poetry50M) informed the custom-tokenizer approach; its larger architecture and incomplete training script were not copied wholesale.

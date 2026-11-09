@@ -16,6 +16,7 @@ from model import (
     BookWindows,
     CausalCollator,
     clean_book,
+    corpus_probe_inputs,
     download_book,
     generate_samples,
     group_books,
@@ -45,6 +46,13 @@ def test_sources_are_parsed_without_execution(tmp_path):
     assert not sentinel.exists()
     corpus.write_text("sources = list()")
     with pytest.raises(ValueError):
+        read_sources(corpus)
+
+
+def test_sources_reject_books_outside_the_original_christmas_list(tmp_path):
+    corpus = tmp_path / "corpus.py"
+    corpus.write_text("sources = ['https://www.gutenberg.org/cache/epub/84/pg84.txt']")
+    with pytest.raises(ValueError, match="outside the approved Christmas corpus"):
         read_sources(corpus)
 
 
@@ -149,6 +157,35 @@ def test_samples_preserve_training_rng_and_mode(tiny_model):
     with pytest.raises(ValueError):
         generate_samples(model, tokenizer, ["x " * 200], 4)
     assert model.training
+
+
+def test_passage_probes_use_exact_tokens_and_never_feed_reference(tiny_model, tmp_path, monkeypatch):
+    model, tokenizer = tiny_model
+    tokens = [0] + tokenizer.encode("The snow falls. Christmas Eve was cold. " * 12) + [0]
+    path = tmp_path / "tokens.jsonl"
+    path.write_text(json.dumps({"id": "46", "ids": tokens}))
+    dataset = BookWindows(path, model.config.n_positions)
+    probes = corpus_probe_inputs(dataset, tokenizer, max_new_tokens=4, seed=42)
+    assert probes == corpus_probe_inputs(dataset, tokenizer, max_new_tokens=4, seed=42)
+    probe, = probes
+    start, length = probe["start_token"], probe["prefix_tokens"]
+    assert probe["book_id"] == "46"
+    assert probe["input_ids"] == tokens[start:start+length]
+    assert probe["reference_ids"] == tokens[start+length:start+length+4]
+    # Decode/re-encode can change IDs at byte or BPE boundaries. Corpus probes
+    # must pass only the original prefix to generate, never the reference.
+    def reject_reencoding(*args, **kwargs):
+        raise AssertionError("Corpus probe was re-tokenized")
+    calls = []
+    original_generate = model.generate
+    def capture_generate(inputs, **kwargs):
+        calls.append(inputs.tolist()[0])
+        return original_generate(inputs, **kwargs)
+    monkeypatch.setattr(tokenizer, "encode", reject_reencoding)
+    monkeypatch.setattr(model, "generate", capture_generate)
+    results = generate_samples(model, tokenizer, probes, max_new_tokens=4)
+    assert len(results) == 2
+    assert calls == [probe["input_ids"], probe["input_ids"]]
 
 
 def test_export_rejects_tokenizer_changes(tiny_model):

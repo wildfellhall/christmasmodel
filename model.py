@@ -12,7 +12,8 @@ Colab GPU runtime, separate cells:
     !python model.py train
     !python model.py generate --prompt "On Christmas Eve, the snow"
 
-No pretrained model or tokenizer is used. --corpus can override the embedded list.
+Training uses only the Christmas books listed below, from random weights.
+No pretrained model or tokenizer is used. --corpus may select a subset of these URLs.
 """
 from __future__ import annotations
 
@@ -267,6 +268,8 @@ def read_sources(path=None):
     for url in selected:
         if not re.fullmatch(r"https://www\.gutenberg\.org/cache/epub/(\d+)/pg\1\.txt", url):
             raise ValueError(f"Unexpected corpus URL: {url}")
+        if url not in sources:
+            raise ValueError(f"Source is outside the approved Christmas corpus: {url}")
     return list(dict.fromkeys(selected))
 
 
@@ -506,13 +509,14 @@ class BookWindows:
     """
     def __init__(self, path, block_size, limit=None):
         import numpy as np
-        self.books, self.windows = [], []
+        self.books, self.book_ids, self.windows = [], [], []
         self.block_size = block_size
         for line in Path(path).read_text().splitlines():
             book = json.loads(line)
             ids = np.asarray(book["ids"], dtype=np.int32)
             index = len(self.books)
             self.books.append(ids)
+            self.book_ids.append(str(book["id"]))
             self.windows.extend((index, start) for start in range(0, len(ids)-1, block_size-1))
         if limit:
             # Spread smoke/evaluation subsets across the corpus, not just book 1.
@@ -581,7 +585,12 @@ def generate_samples(model, tokenizer, prompts, max_new_tokens=96, seed=1234):
         with torch.inference_mode(), torch.random.fork_rng(devices=cuda_devices):
             torch.manual_seed(seed)
             for prompt in prompts:
-                ids = tokenizer.encode(prompt, add_special_tokens=False) or [tokenizer.eos_token_id]
+                if isinstance(prompt, dict):
+                    # Corpus probes use original IDs so a window beginning or
+                    # ending inside a UTF-8/BPE span is not re-tokenized.
+                    ids, prompt = list(prompt["input_ids"]), prompt["prompt"]
+                else:
+                    ids = tokenizer.encode(prompt, add_special_tokens=False) or [tokenizer.eos_token_id]
                 room = model.config.n_positions - len(ids)
                 if room <= 0:
                     raise ValueError("Prompt fills the context window; shorten it")
@@ -927,6 +936,90 @@ print(tokenizer.decode(output[0], skip_special_tokens=True))
 """
 
 
+def corpus_probe_inputs(dataset, tokenizer, max_new_tokens, seed, count=3):
+    """Choose deterministic middle-of-book passages with their original token IDs."""
+    rng = random.Random(seed)
+    probes = []
+    for book in rng.sample(range(len(dataset.books)), min(count, len(dataset.books))):
+        tokens = dataset.books[book]
+        start = max(1, len(tokens) // 2)
+        window = tokens[start:start+dataset.block_size].tolist()
+        prefix_length = min(64, dataset.block_size // 3, len(window)-2)
+        if prefix_length < 1:
+            continue
+        ids = window[:prefix_length]
+        reference = window[prefix_length:prefix_length+max_new_tokens]
+        probes.append({"book_id": dataset.book_ids[book], "start_token": start,
+                       "input_ids": ids, "prefix_tokens": prefix_length,
+                       "prompt": tokenizer.decode(ids, skip_special_tokens=True),
+                       "reference_ids": reference,
+                       "reference_continuation": tokenizer.decode(reference, skip_special_tokens=True)})
+    return probes
+
+
+def diagnose(args):
+    """Compare train/validation in inference mode, then probe known book passages."""
+    from transformers import AutoTokenizer, Trainer, TrainingArguments
+    if not args.model_dir:
+        raise ValueError("diagnose requires --model-dir pointing to a saved project model")
+    path = Path(args.model_dir)
+    data, out = Path(args.data_dir), Path(args.output_dir)
+    if out.exists() and any(out.iterdir()):
+        raise ValueError("Use a new --output-dir for diagnostics; the training run is left untouched")
+    signature = dataset_signature(data)
+    manifest = json.loads((data / "manifest.json").read_text())
+    if any(book["url"] not in sources for book in manifest):
+        raise ValueError("Diagnostic data include sources outside the approved Christmas corpus")
+    tokenizer = AutoTokenizer.from_pretrained(data / "tokenizer", local_files_only=True)
+    # Reuse the project's provenance, tokenizer, and special-ID checks without
+    # creating an optimizer, a training stage, or a new checkpoint.
+    model = load_continuation(path, tokenizer, signature)
+    model.config.use_cache = False
+    model.eval()
+    datasets = {split: BookWindows(data / f"{split}.jsonl", model.config.n_positions, args.diagnostic_windows)
+                for split in ("train", "validation")}
+    trainer = Trainer(model=model, args=TrainingArguments(
+        output_dir=str(out), per_device_eval_batch_size=args.batch_size,
+        use_cpu=args.cpu, report_to="none", dataloader_num_workers=0),
+        data_collator=CausalCollator(tokenizer.pad_token_id),
+        preprocess_logits_for_metrics=loss_sums, compute_metrics=token_metrics)
+    metrics = {}
+    for split, dataset in datasets.items():
+        prefix = f"{split}_eval"
+        result = trainer.evaluate(dataset, metric_key_prefix=prefix)
+        metrics[split] = {"nll": result[f"{prefix}_nll"], "perplexity": result[f"{prefix}_perplexity"],
+                          "scored_tokens": result[f"{prefix}_scored_tokens"], "windows": len(dataset)}
+    gap = metrics["validation"]["nll"] - metrics["train"]["nll"]
+    probes = {}
+    for split, dataset in datasets.items():
+        probes[split] = []
+        for probe in corpus_probe_inputs(dataset, tokenizer, args.sample_tokens, args.seed):
+            generated = generate_samples(model, tokenizer, [probe], args.sample_tokens, args.seed)
+            record = {**probe, "generated": generated}
+            probes[split].append(record)
+            print(f"\n[{split} book {probe['book_id']}] PREFIX: {probe['prompt']}\n"
+                  f"REFERENCE: {probe['reference_continuation']}", flush=True)
+            for sample in generated:
+                print(f"{sample['mode'].upper()}: {sample['continuation']}\n", flush=True)
+    report = {"model_dir": str(path.resolve()), "dataset_sha256": signature,
+              "dropout_disabled": True, "weights_updated": False, "test_evaluated": False,
+              "window_limit_per_split": args.diagnostic_windows, "metrics": metrics,
+              "validation_minus_training_nll": gap,
+              "weight_tying_intact": model.lm_head.weight.data_ptr() == model.transformer.wte.weight.data_ptr(),
+              "probes": probes,
+              "interpretation": "Both losses use inference mode and token weighting. Training windows are "
+              "a deterministic subset when capped. Whole-book splits can include style differences; "
+              "there is no universal NLL-gap threshold for overfitting. Greedy loops alone do not diagnose "
+              "capacity, optimization, or data limitations. Passage probes are qualitative examples, "
+              "not a numerical coherence score."}
+    write_json(out / "diagnostics.json", report)
+    print("\nDIAGNOSTIC SUMMARY (dropout off; no training or test-set evaluation):")
+    print(json.dumps({"metrics": metrics, "validation_minus_training_nll": gap,
+                      "weight_tying_intact": report["weight_tying_intact"]}, indent=2))
+    print(f"Full report and passage probes: {out / 'diagnostics.json'}")
+    return report
+
+
 def inference(args):
     import torch
     from transformers import AutoTokenizer, GPT2LMHeadModel, Trainer, TrainingArguments
@@ -955,8 +1048,8 @@ def inference(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["prepare", "train", "compare-dropout", "evaluate", "generate"])
-    parser.add_argument("--corpus", help="Optional Python file containing sources; defaults to the embedded URLs")
+    parser.add_argument("command", choices=["prepare", "train", "compare-dropout", "diagnose", "evaluate", "generate"])
+    parser.add_argument("--corpus", help="Optional subset of the embedded Christmas URLs, as a Python sources list")
     parser.add_argument("--data-dir", default=str(ROOT / "data"))
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--vocab-size", type=int, default=8192)
@@ -964,7 +1057,7 @@ def main(argv=None):
     parser.add_argument("--offline", action="store_true", help="Require cached Gutenberg downloads")
     parser.add_argument("--min-success-rate", type=float, default=.9)
     parser.add_argument("--output-dir", default=str(ROOT / "runs" / "christmas"))
-    parser.add_argument("--model-dir", help="Saved model for evaluate/generate; defaults to output-dir/best")
+    parser.add_argument("--model-dir", help="Saved model for inference; required for diagnose, otherwise defaults to output-dir/best")
     parser.add_argument("--layers", type=int, default=6)
     parser.add_argument("--width", type=int, default=384)
     parser.add_argument("--heads", type=int, default=6)
@@ -990,6 +1083,8 @@ def main(argv=None):
     parser.add_argument("--smoke-test", action="store_true", help="Tiny CPU model, 3 updates, limited data; not quality training")
     parser.add_argument("--train-limit", type=int, help="Diagnostic window cap; omitted for full training")
     parser.add_argument("--eval-limit", type=int, help="Diagnostic window cap; omitted for full evaluation")
+    parser.add_argument("--diagnostic-windows", type=int, default=1024,
+                        help="Maximum windows per train/validation split for diagnose")
     parser.add_argument("--prompt", default=PROMPTS[0])
     args = parser.parse_args(argv)
     if args.heads <= 0 or args.width % args.heads or args.block_size < 8 or args.vocab_size < 258:
@@ -1008,6 +1103,8 @@ def main(argv=None):
         parser.error("Model sizes, batch sizes, intervals, epochs, and learning rate must be positive")
     if any(x is not None and x <= 0 for x in [args.train_limit, args.eval_limit]):
         parser.error("Diagnostic limits must be positive")
+    if args.diagnostic_windows <= 0:
+        parser.error("diagnostic-windows must be positive")
     if args.max_steps == 0 or args.max_steps < -1:
         parser.error("max-steps must be -1 (use epochs) or a positive step budget")
     if args.command == "prepare":
@@ -1016,6 +1113,8 @@ def main(argv=None):
         training(args)
     elif args.command == "compare-dropout":
         compare_dropout(args)
+    elif args.command == "diagnose":
+        diagnose(args)
     else:
         inference(args)
 
