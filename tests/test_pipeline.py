@@ -23,6 +23,7 @@ from model import (
     loss_sums,
     read_sources,
     select_continuation_result,
+    set_continuation_dropout,
     split_groups,
     token_metrics,
 )
@@ -191,3 +192,28 @@ def test_continuation_keeps_starting_weights_unless_validation_improves(tiny_mod
     assert nll == (3.9 if retain else trained_nll)
     expected = original if retain else changed
     assert all(torch.equal(value, model.state_dict()[name]) for name, value in expected.items())
+
+
+def test_dropout_override_changes_training_and_survives_reload(tiny_model, tmp_path):
+    model, _ = tiny_model
+    ids = torch.tensor([[0, 2, 3, 4, 5, 6, 7, 8]])
+    model.eval()
+    with torch.no_grad():
+        original_eval = model(ids).logits
+    model.train()
+    torch.manual_seed(42)
+    with torch.no_grad():
+        original_training = model(ids).logits
+    set_continuation_dropout(model, .05)
+    torch.manual_seed(42)
+    with torch.no_grad():
+        changed_training = model(ids).logits
+    assert not torch.allclose(original_training, changed_training)
+    model.eval()
+    with torch.no_grad():
+        assert torch.equal(original_eval, model(ids).logits)
+    destination = tmp_path / "changed-dropout"
+    model.save_pretrained(destination)
+    loaded = GPT2LMHeadModel.from_pretrained(destination)
+    assert all(getattr(loaded.config, key) == .05 for key in ("resid_pdrop", "embd_pdrop", "attn_pdrop"))
+    assert all(module.p == .05 for module in loaded.modules() if isinstance(module, torch.nn.Dropout))

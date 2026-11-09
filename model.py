@@ -645,6 +645,18 @@ def select_continuation_result(model, initial, initial_nll, trained_nll, trained
     return trained_checkpoint, trained_nll, False
 
 
+def set_continuation_dropout(model, rate):
+    """Change both saved config and already-instantiated GPT-2 dropout modules."""
+    import torch
+    if not 0 <= rate < 1:
+        raise ValueError("Continuation dropout must be in [0,1)")
+    for field in ("resid_pdrop", "embd_pdrop", "attn_pdrop"):
+        setattr(model.config, field, rate)
+    for module in model.modules():
+        if isinstance(module, torch.nn.Dropout):
+            module.p = rate
+
+
 def training(args):
     import torch
     from transformers import (
@@ -687,6 +699,11 @@ def training(args):
             raise ValueError("Continuation needs a separate output directory from its source run")
         model = load_continuation(source, tokenizer, signature)
         continuation = {"source": str(source), "dataset_sha256": signature}
+        if args.continuation_dropout is not None:
+            continuation["original_dropout"] = {field: getattr(model.config, field)
+                for field in ("resid_pdrop", "embd_pdrop", "attn_pdrop")}
+            set_continuation_dropout(model, args.continuation_dropout)
+            continuation["dropout_override"] = args.continuation_dropout
     elif resume and (out / "continuation.json").exists():
         continuation = json.loads((out / "continuation.json").read_text())
         model = load_continuation(initial, tokenizer, signature)
@@ -703,12 +720,13 @@ def training(args):
                 "learning_rate": args.learning_rate, "epochs": args.epochs, "max_steps": args.max_steps,
                 "seed": args.seed, "train_limit": args.train_limit, "eval_limit": args.eval_limit,
                 "eval_steps": args.eval_steps, "patience": args.patience, "smoke_test": args.smoke_test,
-                "warmup_ratio": args.warmup_ratio}
+                "warmup_ratio": args.warmup_ratio, "skip_test": args.skip_test}
     if continuation is not None:
         settings["continue_from"] = continuation["source"]
     if resume:
         prior = json.loads((out / "run_config.json").read_text())
         prior.setdefault("warmup_ratio", .05)  # Compatibility with the original script.
+        prior.setdefault("skip_test", False)
         if prior != settings:
             raise ValueError("Run settings or dataset differ from saved run_config.json; use a new run")
     out.mkdir(parents=True, exist_ok=True)
@@ -800,19 +818,67 @@ def training(args):
     tokenizer.save_pretrained(best)
     trainer.save_state()
     trainer.remove_callback(EarlyStoppingCallback)
-    test_set = BookWindows(data / "test.jsonl", args.block_size, args.eval_limit)
-    metrics = trainer.evaluate(test_set, metric_key_prefix="test")
+    metrics = {}
+    if not args.skip_test:
+        test_set = BookWindows(data / "test.jsonl", args.block_size, args.eval_limit)
+        metrics = trainer.evaluate(test_set, metric_key_prefix="test")
     summary = {"parameters": parameters, "best_checkpoint": trainer.state.best_model_checkpoint,
                "best_validation_nll": trainer.state.best_metric, "global_step": trainer.state.global_step,
                "dataset_sha256": signature, "smoke_test": args.smoke_test,
                "limited_data": bool(args.train_limit or args.eval_limit), "test": metrics,
                "corpus": report, "run": settings, "continuation": continuation}
     write_json(best / "training_summary.json", summary)
-    write_json(out / "test_metrics.json", metrics)
+    if not args.skip_test:
+        write_json(out / "test_metrics.json", metrics)
     final_samples = generate_samples(model, tokenizer, PROMPTS, args.sample_tokens)
     write_json(best / "samples.json", final_samples)
     (best / "README.md").write_text(model_card(summary), encoding="utf-8")
-    print(f"Best model and tokenizer: {best}\nHeld-out test: {json.dumps(metrics, indent=2)}", flush=True)
+    print(f"Best model and tokenizer: {best}", flush=True)
+    print("Test evaluation skipped for model development." if args.skip_test else
+          f"Held-out test: {json.dumps(metrics, indent=2)}", flush=True)
+    return summary
+
+
+def compare_dropout(args):
+    """A paired, bounded experiment; reports loss and samples, not a coherence score."""
+    import gc
+
+    import torch
+    if not args.continue_from or args.resume or args.rebuild:
+        raise ValueError("compare-dropout requires --continue-from and a new output directory; no --resume/--rebuild")
+    if args.max_steps <= 0:
+        raise ValueError("Set an explicit --max-steps budget for each comparison branch (for example, 500)")
+    if args.continuation_dropout is None:
+        raise ValueError("Set --continuation-dropout for the treatment branch (for example, 0.05)")
+    out = Path(args.output_dir)
+    if out.exists() and any(out.iterdir()):
+        raise ValueError("Use a new --output-dir for the paired comparison")
+    results = {}
+    for name, dropout in (("control", None), ("lower-dropout", args.continuation_dropout)):
+        branch = argparse.Namespace(**vars(args))
+        branch.command, branch.output_dir = "train", str(out / name)
+        branch.continuation_dropout, branch.skip_test = dropout, True
+        # Keep both branches on the same update budget, including if progress is flat.
+        branch.patience = max(args.patience, math.ceil(args.max_steps / args.eval_steps) + 1)
+        summary = training(branch)
+        results[name] = {"dropout": dropout if dropout is not None else "inherited",
+                         "initial_validation_nll": summary["continuation"]["initial_validation_nll"],
+                         "best_new_validation_nll": summary["continuation"]["best_new_validation_nll"],
+                         "selected_validation_nll": summary["best_validation_nll"],
+                         "retained_initial_model": summary["continuation"]["retained_initial_model"],
+                         "updates": summary["global_step"],
+                         "samples": json.loads((Path(branch.output_dir) / "best" / "samples.json").read_text())}
+        write_json(out / "comparison.json", results)
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    print("\nPaired comparison (same source weights, data, learning rate, seed, and update budget):")
+    for name, result in results.items():
+        print(f"{name}: best new validation NLL={result['best_new_validation_nll']}; "
+              f"retained starting model={result['retained_initial_model']}")
+    print(f"Read both sets of samples in {out / 'comparison.json'}. "
+          "Lower NLL alone does not establish better narrative coherence.")
+    return results
 
 
 def model_card(summary):
@@ -839,7 +905,7 @@ repetition, dated language, and historical biases. Repeated epochs are not new d
 
 Best validation NLL: {summary['best_validation_nll']}
 Continuation details: {json.dumps(summary.get('continuation'))}
-Test token perplexity: {summary['test'].get('test_perplexity')}
+Test token perplexity: {summary['test'].get('test_perplexity', 'not evaluated in this development run')}
 Smoke test: {summary['smoke_test']}; limited data: {summary['limited_data']}.
 Scores use this model's tokenizer and are not directly comparable to other vocabularies.
 Overlap-group splits reduce, but cannot guarantee the absence of, shared passages.
@@ -889,7 +955,7 @@ def inference(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["prepare", "train", "evaluate", "generate"])
+    parser.add_argument("command", choices=["prepare", "train", "compare-dropout", "evaluate", "generate"])
     parser.add_argument("--corpus", help="Optional Python file containing sources; defaults to the embedded URLs")
     parser.add_argument("--data-dir", default=str(ROOT / "data"))
     parser.add_argument("--seed", type=int, default=42)
@@ -917,6 +983,9 @@ def main(argv=None):
     restart = parser.add_mutually_exclusive_group()
     restart.add_argument("--resume", nargs="?", const="latest", help="Resume latest or a checkpoint directory")
     restart.add_argument("--continue-from", help="Start a new stage from this project's best/ or checkpoint weights; fresh optimizer/schedule")
+    parser.add_argument("--continuation-dropout", type=float,
+                        help="Explicit new-stage override for embedding, residual, and attention dropout; otherwise inherit")
+    parser.add_argument("--skip-test", action="store_true", help="Use validation only during model development")
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--smoke-test", action="store_true", help="Tiny CPU model, 3 updates, limited data; not quality training")
     parser.add_argument("--train-limit", type=int, help="Diagnostic window cap; omitted for full training")
@@ -929,6 +998,10 @@ def main(argv=None):
         parser.error("min-success-rate must be in (0,1]; dropout in [0,1)")
     if not 0 <= args.warmup_ratio < 1:
         parser.error("warmup-ratio must be in [0,1)")
+    if args.continuation_dropout is not None and (
+        not args.continue_from or not 0 <= args.continuation_dropout < 1
+    ):
+        parser.error("continuation-dropout requires --continue-from and a value in [0,1)")
     if any(x <= 0 for x in [args.layers, args.heads, args.width, args.batch_size, args.accumulation,
                             args.eval_steps, args.sample_steps, args.sample_tokens, args.patience,
                             args.epochs, args.learning_rate]):
@@ -941,6 +1014,8 @@ def main(argv=None):
         prepare(args)
     elif args.command == "train":
         training(args)
+    elif args.command == "compare-dropout":
+        compare_dropout(args)
     else:
         inference(args)
 

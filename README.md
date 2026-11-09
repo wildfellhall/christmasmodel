@@ -121,6 +121,33 @@ The original run remains untouched. The new output directory saves an `initial/`
 
 If the new stage is interrupted, use the same options but **replace** `--continue-from` and its path with `--resume`. This restores the new stage's optimizer/scheduler/RNG rather than starting another stage. `--resume` preserves an existing training budget; changing its epoch or LR settings is not a continuation mechanism.
 
+### Compare dropout after stage 2
+
+The reported continuation improved validation NLL to 3.8586 and test perplexity to 54.00, but greedy generation looped and conservative sampling still lost narrative meaning. This does not establish that dropout is the cause. The following bounded experiment tests that hypothesis while keeping the original corpus, tokenizer, architecture, and weights.
+
+Paste the updated `model.py` into a fresh cell in the existing session, with:
+
+```python
+NOTEBOOK_ARGS = [
+    "compare-dropout",
+    "--continue-from", "/content/runs/christmas-stage2/best",
+    "--data-dir", "/content/data",
+    "--output-dir", "/content/runs/christmas-dropout-comparison",
+    "--max-steps", "500",         # 500 optimizer updates per branch
+    "--learning-rate", "5e-5",
+    "--warmup-ratio", "0.03",
+    "--eval-steps", "100",
+    "--sample-steps", "100",
+    "--continuation-dropout", "0.05",
+]
+```
+
+Both branches start independently from the same stage-2 weights and use the same shuffled data, seed, learning-rate schedule, and update budget. `control/` inherits the existing dropout (normally 0.15 embedding/residual and 0.1 attention); `lower-dropout/` uses 0.05 throughout. The override changes the live dropout modules as well as the serialized configuration. Architecture flags do not resize an existing model. Early-stopping patience is raised above the comparison budget so both branches receive the same number of updates.
+
+This uses **1,000 updates in total**, roughly 2.4 passes through the audited training data at the default batch size. It does not evaluate the test set. `comparison.json` contains both validation results and fixed-seed greedy/sampled passages, and each branch retains the starting weights if no new checkpoint improves validation. Examine grammar, repetition, and consistent references across both sets of passages; a small NLL gain alone is insufficient to select a prose-generation recipe. The comparison is unvalidated for prose quality until run on the user's trained stage-2 model.
+
+Use a new output directory for a new paired experiment. To resume an interrupted individual branch, use `train --resume` with that branch's output directory, the same numerical training arguments, `--skip-test`, and the saved patience from its `run_config.json`; omit `--continue-from` and `--continuation-dropout`. After resuming, its results are in that branch's `best/` directory (the parent comparison report is not automatically regenerated). For a single new continuation, `--continuation-dropout` is optional; omitting it preserves the source dropout. `--skip-test` is also available for other development runs.
+
 ## Export weights and download GGUF
 
 After training, install the exporter dependencies. These preserve Colab's CUDA PyTorch installation.
@@ -192,6 +219,6 @@ python -m pytest -q
 python model.py train --smoke-test --output-dir runs/smoke
 ```
 
-The smoke test uses a tiny CPU model and limited windows; its scores and samples do not measure the full model's quality. Implementation checks cover real-corpus preparation, fifteen regression tests, brief training and continuation runs with the full 13,989,888-parameter/512-context configuration, and checkpoint resumption with identical final weights. Continuation checks cover source-weight identity, data/tokenizer compatibility, and retaining the starting weights when validation does not improve. Both F16 (28.7 MB) and Q8 (15.8 MB) exports of that configuration loaded in llama.cpp, matched all five tokenizer probes, and matched three greedy first-token predictions against Hugging Face. The twelve-epoch quality results above were supplied by the user; the proposed six-epoch continuation has not yet been evaluated for prose quality.
+The smoke test uses a tiny CPU model and limited windows; its scores and samples do not measure the full model's quality. Implementation checks cover real-corpus preparation, sixteen regression tests, brief training and continuation runs with the full 13,989,888-parameter/512-context configuration, and checkpoint resumption with identical final weights. Continuation checks cover source-weight identity, data/tokenizer compatibility, retaining the starting weights when validation does not improve, and dropout behavior after reload. A short paired dropout run confirmed identical initial weights and validation scores, equal update counts, and skipped test evaluation. A separate gradient check on unequal-length real-corpus windows matched full-batch and accumulated gradients within 3e-8 in float32 with dropout disabled. Both F16 (28.7 MB) and Q8 (15.8 MB) exports of that configuration loaded in llama.cpp, matched all five tokenizer probes, and matched three greedy first-token predictions against Hugging Face. The full-run quality results above were supplied by the user; no improved prose quality is claimed for the new dropout experiment.
 
 The implementation follows the [Transformers GPT-2 interface](https://huggingface.co/docs/transformers/v4.57.6/en/model_doc/gpt2) and [Hugging Face Hub upload API](https://huggingface.co/docs/huggingface_hub/guides/upload). [Poetry50M](https://github.com/wildfellhall/Poetry50M) informed the custom-tokenizer approach; its larger architecture and incomplete training script were not copied wholesale.
