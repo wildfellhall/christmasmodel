@@ -1,6 +1,6 @@
 # Christmasmodel
 
-Train a small literary continuation model **from random weights** on the Christmas and winter books in `corpus.py`. `model.py` downloads and cleans the books, learns a tokenizer, trains a `GPT2LMHeadModel(GPT2Config(...))`, prints checkpoint samples, and evaluates the best validation checkpoint on held-out books. `export.py` saves a Hugging Face package and converts the weights to GGUF.
+Train a small literary continuation model **from random weights** on the Christmas and winter books listed directly in `model.py` and also in `corpus.py`. `model.py` downloads and cleans the books, learns a tokenizer, trains a `GPT2LMHeadModel(GPT2Config(...))`, prints checkpoint samples, and evaluates the best validation checkpoint on held-out books. `export.py` saves a Hugging Face package and converts the weights to GGUF.
 
 ## Corpus findings and model choice
 
@@ -35,7 +35,17 @@ These are justified starting defaults, **not the result of a completed hyperpara
 
 Select **Runtime → Change runtime type → GPU**. A T4 is a suitable starting point; the script selects FP16 on T4 and BF16 on supported GPUs. CPU execution works for verification but is slower. GPU execution has not been tested in the implementation environment.
 
-Run these cells in order:
+**One continuous cell:** open [model.py](model.py), copy the entire file into one code cell in a fresh Colab GPU runtime, and run it. The cell installs its dependencies, uses its embedded list of all 189 URLs, and starts training automatically. It does not need a repository clone, `corpus.py`, or `requirements.txt`.
+
+Edit `NOTEBOOK_ARGS` near the top before running if needed:
+
+```python
+NOTEBOOK_ARGS = ["train"]                # Full training (default)
+# NOTEBOOK_ARGS = ["train", "--resume"]  # Resume using the same data/output paths
+# NOTEBOOK_ARGS = ["train", "--smoke-test", "--output-dir", "runs/smoke"]
+```
+
+Alternatively, use the repository files and run these cells in order:
 
 ```python
 !git clone https://github.com/wildfellhall/christmasmodel.git
@@ -47,7 +57,7 @@ Run these cells in order:
 !python model.py train
 ```
 
-No pretrained weights or pretrained tokenizer are downloaded. You can also paste `model.py` into a notebook cell, with its dependencies installed and `corpus.py` in the working directory, then call `main(["train"])`.
+No pretrained weights or pretrained tokenizer are downloaded. Both notebook and command-line runs use the embedded URLs by default. To use a separate source list explicitly, pass `--corpus path/to/corpus.py`. Existing prepared data and checkpoints from the original source list remain compatible.
 
 Downloads are sequential, cached, and retried. Failed sources are listed in `data/download_failures.json`; preparation stops if fewer than 90% succeed. Use `--min-success-rate 1` to require every URL, `--offline` to require cached downloads, and `--rebuild` to explicitly regenerate prepared data. Missing or changed preparation settings are not silently reused.
 
@@ -141,7 +151,7 @@ To upload an existing export, or retry an interrupted upload without converting 
 
 ## Data preparation and evaluation details
 
-- Parse `sources` using `ast.literal_eval`, without importing/executing `corpus.py`.
+- Use the `sources` list embedded in `model.py`. For an explicit `--corpus` override, parse `sources` using `ast.literal_eval`, without importing/executing that file.
 - Require English metadata and Gutenberg start/end markers; reject HTML/error pages and very short results. Remove the license wrapper, production credits, illustration blocks, and page markers. Unwrap long prose lines while retaining short verse lines and paragraph breaks. Cleanup is conservative: title pages, tables of contents, and some editorial material can remain.
 - Detect near-identical editions using content-sampled 13-word shingles. Group books sharing at least 12 sampled shingles and 5% of the smaller signature; split whole groups approximately 90/5/5 by word count. This keeps detected anthology overlap in one partition. Authors may span splits. Small or heavily edited quotations can escape this heuristic; it is not proof of zero contamination. The audit also found zero cross-split exact paragraphs of at least 80 normalized words.
 - Fit BPE only on training books. Begin/end books with EOS. Build windows within each book with a one-token overlap, so every next-token target is scored once and tails are retained. Padding is masked with `-100`; genuine EOS labels remain supervised.
