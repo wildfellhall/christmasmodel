@@ -21,6 +21,7 @@ from model import (
     download_book,
     generate_samples,
     group_books,
+    grow_gpt2_depth,
     load_continuation,
     loss_sums,
     read_sources,
@@ -30,6 +31,7 @@ from model import (
     split_groups,
     token_metrics,
     training_trainer,
+    verify_depth_growth,
     window_epoch_callback,
 )
 
@@ -401,3 +403,79 @@ def test_dropout_override_changes_training_and_survives_reload(tiny_model, tmp_p
     loaded = GPT2LMHeadModel.from_pretrained(destination)
     assert all(getattr(loaded.config, key) == .05 for key in ("resid_pdrop", "embd_pdrop", "attn_pdrop"))
     assert all(module.p == .05 for module in loaded.modules() if isinstance(module, torch.nn.Dropout))
+
+
+def test_depth_growth_preserves_logits_cache_and_saved_model(tiny_model, tmp_path):
+    template, tokenizer = tiny_model
+    config = GPT2Config(**template.config.to_dict())
+    config.n_layer = 2
+    source = GPT2LMHeadModel(config)
+    source.train()
+    original = {key: value.clone() for key, value in source.state_dict().items()}
+    grown, info = grow_gpt2_depth(source, 4)
+    assert info["old_layer_positions"] == [0, 2]
+    assert info["inserted_layers"] == [1, 3]
+    assert source.config.n_layer == 2 and grown.config.n_layer == 4
+    assert source.training and grown.training
+    assert source.transformer.wte.weight.data_ptr() != grown.transformer.wte.weight.data_ptr()
+    assert grown.transformer.wte.weight.data_ptr() == grown.lm_head.weight.data_ptr()
+    assert all(torch.equal(original[key], value) for key, value in source.state_dict().items())
+    for old, new in enumerate(info["old_layer_positions"]):
+        assert grown.transformer.h[new].attn.layer_idx == new
+        assert all(torch.equal(value, grown.transformer.h[new].state_dict()[key])
+                   for key, value in source.transformer.h[old].state_dict().items())
+    check = verify_depth_growth(source, grown, tokenizer)
+    assert check["max_absolute_logit_difference"] < 1e-6
+    assert source.training and grown.training
+    source.eval()
+    grown.eval()
+    batch = CausalCollator(tokenizer.pad_token_id)([
+        {"input_ids": [0, 2, 3, 4, 5, 6, 0]}, {"input_ids": [0, 7, 8, 0]}])
+    with torch.inference_mode():
+        expected = source(**batch).logits
+        torch.testing.assert_close(grown(**batch).logits, expected, atol=1e-6, rtol=1e-5)
+    # Cached generation catches incorrect cache indices in copied blocks.
+    assert generate_samples(grown, tokenizer, ["The snow"], 8) == generate_samples(source, tokenizer, ["The snow"], 8)
+    destination = tmp_path / "expanded"
+    grown.save_pretrained(destination)
+    loaded = GPT2LMHeadModel.from_pretrained(destination)
+    assert loaded.config.n_layer == 4 and loaded.num_parameters() == info["target_parameters"]
+    assert loaded.transformer.wte.weight.data_ptr() == loaded.lm_head.weight.data_ptr()
+    with torch.inference_mode():
+        torch.testing.assert_close(loaded(**batch).logits, expected, atol=1e-6, rtol=1e-5)
+
+
+def test_identity_blocks_receive_gradients_and_begin_learning(tiny_model):
+    source, tokenizer = tiny_model
+    grown, info = grow_gpt2_depth(source, 3)
+    assert all(parameter.requires_grad for parameter in grown.parameters())
+    batch = CausalCollator(tokenizer.pad_token_id)([{"input_ids": [0, 2, 3, 4, 5, 6, 7, 0]}])
+    optimizer = torch.optim.AdamW(grown.parameters(), lr=1e-3, weight_decay=0)
+    grown.eval()  # Disable dropout only; gradients remain enabled.
+    grown(**batch).loss.backward()
+    for index in info["inserted_layers"]:
+        block = grown.transformer.h[index]
+        assert block.attn.c_proj.weight.grad.abs().sum() > 0
+        assert block.mlp.c_proj.weight.grad.abs().sum() > 0
+    optimizer.step()
+    optimizer.zero_grad()
+    grown(**batch).loss.backward()
+    for index in info["inserted_layers"]:
+        block = grown.transformer.h[index]
+        assert block.attn.c_attn.weight.grad.abs().sum() > 0
+        assert block.mlp.c_fc.weight.grad.abs().sum() > 0
+
+
+def test_depth_growth_rejects_unsupported_configs_and_changes(tiny_model):
+    source, tokenizer = tiny_model
+    with pytest.raises(ValueError, match="must exceed"):
+        grow_gpt2_depth(source, source.config.n_layer)
+    source.config.scale_attn_by_inverse_layer_idx = True
+    with pytest.raises(ValueError, match="layer-index"):
+        grow_gpt2_depth(source, 3)
+    source.config.scale_attn_by_inverse_layer_idx = False
+    grown, _ = grow_gpt2_depth(source, 3)
+    with torch.no_grad():
+        grown.transformer.wte.weight[2].add_(10)
+    with pytest.raises(ValueError, match="changed initial logits"):
+        verify_depth_growth(source, grown, tokenizer)

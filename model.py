@@ -787,6 +787,69 @@ def set_continuation_dropout(model, rate):
             module.p = rate
 
 
+def grow_gpt2_depth(source, layers):
+    """Insert identity residual blocks while retaining a standard GPT-2 model."""
+    import copy
+
+    import torch
+    from transformers import GPT2LMHeadModel
+    previous = source.config.n_layer
+    if layers <= previous:
+        raise ValueError(f"New depth must exceed the source model's {previous} layers")
+    if (source.config.add_cross_attention or source.config.scale_attn_by_inverse_layer_idx
+            or not source.config.tie_word_embeddings
+            or source.lm_head.weight.data_ptr() != source.transformer.wte.weight.data_ptr()):
+        raise ValueError("Depth growth requires plain GPT-2 with tied embeddings and no layer-index attention scaling")
+    config = copy.deepcopy(source.config)
+    config.n_layer = layers
+    grown = GPT2LMHeadModel(config).to(device=source.device, dtype=source.dtype)
+    grown.generation_config = copy.deepcopy(source.generation_config)
+    mapping = [index*layers//previous for index in range(previous)]
+    inserted = [index for index in range(layers) if index not in mapping]
+    grown.transformer.wte.load_state_dict(source.transformer.wte.state_dict())
+    grown.transformer.wpe.load_state_dict(source.transformer.wpe.state_dict())
+    grown.transformer.ln_f.load_state_dict(source.transformer.ln_f.state_dict())
+    for old, new in enumerate(mapping):
+        grown.transformer.h[new].load_state_dict(source.transformer.h[old].state_dict())
+    with torch.no_grad():
+        for index in inserted:
+            # Each pre-LN GPT-2 block adds attention and MLP outputs to its
+            # input. Zero output projections make these two residuals zero.
+            # The other new weights stay random so the block can learn.
+            for projection in (grown.transformer.h[index].attn.c_proj, grown.transformer.h[index].mlp.c_proj):
+                projection.weight.zero_()
+                projection.bias.zero_()
+    grown.tie_weights()
+    grown.train(source.training)
+    return grown, {"method": "interleaved_identity_residual_blocks", "source_layers": previous,
+                   "target_layers": layers, "old_layer_positions": mapping, "inserted_layers": inserted,
+                   "source_parameters": source.num_parameters(), "target_parameters": grown.num_parameters()}
+
+
+def verify_depth_growth(source, grown, tokenizer):
+    """Reject an expansion that changes logits on the fixed opening probes."""
+    import torch
+    source_mode, grown_mode = source.training, grown.training
+    source.eval()
+    grown.eval()
+    maximum = 0.
+    try:
+        with torch.inference_mode():
+            for prompt in PROMPTS:
+                ids = tokenizer.encode(prompt, add_special_tokens=False)[:source.config.n_positions]
+                inputs = torch.tensor([ids], device=source.device)
+                expected = source(inputs, use_cache=False).logits
+                actual = grown(inputs, use_cache=False).logits
+                maximum = max(maximum, float((actual-expected).abs().max()))
+                if not torch.allclose(actual, expected, rtol=1e-5, atol=1e-6):
+                    raise ValueError("Depth growth changed initial logits; refusing to start training")
+    finally:
+        source.train(source_mode)
+        grown.train(grown_mode)
+    return {"prompts_checked": len(PROMPTS), "max_absolute_logit_difference": maximum,
+            "dropout_disabled": True, "rtol": 1e-5, "atol": 1e-6}
+
+
 def training(args):
     import torch
     from transformers import (
@@ -828,6 +891,14 @@ def training(args):
             raise ValueError("Continuation needs a separate output directory from its source run")
         model = load_continuation(source, tokenizer, signature)
         continuation = {"source": str(source), "dataset_sha256": signature}
+        if args.grow_layers is not None:
+            grown, growth = grow_gpt2_depth(model, args.grow_layers)
+            growth["verification"] = verify_depth_growth(model, grown, tokenizer)
+            continuation["depth_growth"] = growth
+            model = grown
+            print(f"Depth growth: {growth['source_layers']} -> {growth['target_layers']} layers; "
+                  f"{growth['target_parameters']:,} parameters. "
+                  f"Initial logit check: {growth['verification']}", flush=True)
         if args.continuation_dropout is not None:
             continuation["original_dropout"] = {field: getattr(model.config, field)
                 for field in ("resid_pdrop", "embd_pdrop", "attn_pdrop")}
@@ -837,8 +908,8 @@ def training(args):
         continuation = json.loads((out / "continuation.json").read_text())
         model = load_continuation(initial, tokenizer, signature)
     if continuation is not None:
-        # Continue the same architecture, context, and regularization. CLI size
-        # settings apply only to new randomly initialized models.
+        # Inherit the source architecture unless explicitly grown above. Ordinary
+        # CLI size settings apply only to new randomly initialized models.
         args.layers, args.width, args.heads = model.config.n_layer, model.config.n_embd, model.config.n_head
         args.block_size, args.dropout = model.config.n_positions, model.config.resid_pdrop
         model.config.use_cache = False
@@ -853,11 +924,13 @@ def training(args):
                 "random_window_offsets": args.random_window_offsets}
     if continuation is not None:
         settings["continue_from"] = continuation["source"]
+    settings["grow_layers"] = (continuation or {}).get("depth_growth", {}).get("target_layers")
     if resume:
         prior = json.loads((out / "run_config.json").read_text())
         prior.setdefault("warmup_ratio", .05)  # Compatibility with the original script.
         prior.setdefault("skip_test", False)
         prior.setdefault("random_window_offsets", False)
+        prior.setdefault("grow_layers", None)
         if prior != settings:
             raise ValueError("Run settings or dataset differ from saved run_config.json; use a new run")
     out.mkdir(parents=True, exist_ok=True)
@@ -1015,23 +1088,42 @@ def compare_dropout(args):
 
 
 def compare_windowing(args):
-    """Compare fixed versus shifted training windows; all other settings match."""
+    return compare_training_variants(args, "windowing")
+
+
+def compare_depth(args):
+    return compare_training_variants(args, "depth")
+
+
+def compare_training_variants(args, kind):
+    """Bounded windowing or depth comparison with the same data/update budget."""
     import gc
 
     import torch
-    from transformers import AutoTokenizer
+    from transformers import AutoTokenizer, GPT2Config
     if not args.continue_from or args.resume or args.rebuild or args.smoke_test:
-        raise ValueError("compare-windowing requires --continue-from, new output, and no --resume/--rebuild/--smoke-test")
+        raise ValueError(f"compare-{kind} requires --continue-from, new output, and no --resume/--rebuild/--smoke-test")
     if args.max_steps <= 0 or args.continuation_dropout is not None:
         raise ValueError("Set --max-steps per branch and inherit the source dropout for this comparison")
     out = Path(args.output_dir)
     if out.exists() and any(out.iterdir()):
-        raise ValueError("Use a new --output-dir for the windowing comparison")
+        raise ValueError("Use a new --output-dir for the comparison")
+    if kind == "depth":
+        config = GPT2Config.from_pretrained(args.continue_from, local_files_only=True)
+        if args.grow_layers is None or args.grow_layers <= config.n_layer:
+            raise ValueError(f"Set --grow-layers greater than the source depth ({config.n_layer})")
+        variants = (("control", None), ("expanded", args.grow_layers))
+    else:
+        variants = (("fixed", False), ("shifted", True))
     results = {}
-    for name, shifted in (("fixed", False), ("shifted", True)):
+    for name, value in variants:
         branch = argparse.Namespace(**vars(args))
         branch.command, branch.output_dir = "train", str(out / name)
-        branch.random_window_offsets, branch.skip_test = shifted, True
+        branch.skip_test = True
+        if kind == "depth":
+            branch.grow_layers = value
+        else:
+            branch.random_window_offsets = value
         branch.patience = max(args.patience, math.ceil(args.max_steps / args.eval_steps)+1)
         summary = training(branch)
         best = Path(branch.output_dir) / "best"
@@ -1048,7 +1140,9 @@ def compare_windowing(args):
                 for sample in samples:
                     print(f"{sample['mode'].upper()}: {sample['continuation']}\n", flush=True)
         write_json(best / "passage_samples.json", passages)
-        results[name] = {"random_window_offsets": shifted,
+        results[name] = {"random_window_offsets": branch.random_window_offsets,
+                         "parameters": summary["parameters"], "layers": summary["run"]["layers"],
+                         "depth_growth": summary["continuation"].get("depth_growth"),
                          "initial_validation_nll": summary["continuation"]["initial_validation_nll"],
                          "best_new_validation_nll": summary["continuation"]["best_new_validation_nll"],
                          "selected_validation_nll": summary["best_validation_nll"],
@@ -1060,10 +1154,22 @@ def compare_windowing(args):
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-    print("\nWINDOWING COMPARISON (same starting model, target counts, and update budget):")
+    print(f"\n{kind.upper()} COMPARISON (same source model, target counts, and update budget):")
+    if kind == "depth":
+        print("The expanded branch uses more compute per update; this is not a matched-compute comparison.")
     print(json.dumps({name: {key: value for key, value in result.items()
                              if key not in {"samples", "passage_samples"}}
                       for name, result in results.items()}, indent=2))
+    print("\nMATCHED PASSAGES (include these with the metrics when assessing quality):")
+    for split in ("train", "validation"):
+        pairs = [(name, next((probe for probe in result["passage_samples"] if probe["split"] == split), None))
+                 for name, result in results.items()]
+        if any(probe is None for _, probe in pairs):
+            continue
+        print(f"\n{split.upper()} PREFIX: {pairs[0][1]['prompt']}")
+        for name, probe in pairs:
+            for sample in probe["generated"]:
+                print(f"{name.upper()} / {sample['mode'].upper()}: {sample['continuation']}\n")
     print(f"Read both sets of passages in {out / 'comparison.json'}. "
           "Loss improvement alone is not evidence of coherent generation.")
     return results
@@ -1081,10 +1187,11 @@ tags:
 ---
 # Christmasmodel
 
-A {summary['parameters']:,}-parameter GPT-2 language model initialized randomly
-and trained on the Gutenberg works listed in
+A {summary['parameters']:,}-parameter GPT-2 language model trained on the Gutenberg works listed in
 [christmasmodel](https://github.com/wildfellhall/christmasmodel/blob/main/corpus.py).
 Its byte-level BPE vocabulary was learned on training books only.
+The base model starts from random weights. Continuations reuse only this project's
+own weights; optional depth expansion inserts initially identity residual blocks.
 
 This is a literary continuation model, not an instruction/chat model. Use a
 story opening as the prompt. Coherence, novelty, and factual accuracy are not
@@ -1314,7 +1421,7 @@ def inference(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["prepare", "train", "compare-dropout", "compare-windowing", "diagnose",
+    parser.add_argument("command", choices=["prepare", "train", "compare-dropout", "compare-windowing", "compare-depth", "diagnose",
                                             "compare-decoding", "evaluate", "generate"])
     parser.add_argument("--corpus", help="Optional subset of the embedded Christmas URLs, as a Python sources list")
     parser.add_argument("--data-dir", default=str(ROOT / "data"))
@@ -1343,6 +1450,8 @@ def main(argv=None):
     restart = parser.add_mutually_exclusive_group()
     restart.add_argument("--resume", nargs="?", const="latest", help="Resume latest or a checkpoint directory")
     restart.add_argument("--continue-from", help="Start a new stage from this project's best/ or checkpoint weights; fresh optimizer/schedule")
+    parser.add_argument("--grow-layers", type=int,
+                        help="With --continue-from, expand to this depth by inserting initially identity GPT-2 blocks")
     parser.add_argument("--continuation-dropout", type=float,
                         help="Explicit new-stage override for embedding, residual, and attention dropout; otherwise inherit")
     parser.add_argument("--skip-test", action="store_true", help="Use validation only during model development")
@@ -1369,6 +1478,10 @@ def main(argv=None):
         not args.continue_from or not 0 <= args.continuation_dropout < 1
     ):
         parser.error("continuation-dropout requires --continue-from and a value in [0,1)")
+    if args.grow_layers is not None and (
+        not args.continue_from or args.grow_layers <= 0 or args.command not in {"train", "compare-depth"}
+    ):
+        parser.error("grow-layers requires train/compare-depth with --continue-from and a positive target depth")
     if any(x <= 0 for x in [args.layers, args.heads, args.width, args.batch_size, args.accumulation,
                             args.eval_steps, args.sample_steps, args.sample_tokens, args.patience,
                             args.epochs, args.learning_rate]):
@@ -1387,6 +1500,8 @@ def main(argv=None):
         compare_dropout(args)
     elif args.command == "compare-windowing":
         compare_windowing(args)
+    elif args.command == "compare-depth":
+        compare_depth(args)
     elif args.command == "diagnose":
         diagnose(args)
     elif args.command == "compare-decoding":

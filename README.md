@@ -240,6 +240,52 @@ Shifted windows can overlap or omit some interior targets on an individual pass.
 
 For one independent training stage, add `--random-window-offsets` to `train --continue-from ...`. Existing runs keep fixed windows by default. To resume an interrupted comparison branch, use `train --resume` with that branch's output directory, the same numerical settings, `--skip-test`, and the saved patience from `run_config.json`. Include `--random-window-offsets` for the shifted branch only, and omit `--continue-from`. After an individual resume, branch results are updated but the parent `comparison.json` is not regenerated automatically.
 
+### Test additional depth while retaining the learned model
+
+The reported 1,000-update windowing comparison improved validation NLL to **3.818915** with fixed windows and **3.799722** with shifted windows, from the same 3.835750 starting point. Shifted windows reduced perplexity by about 1.90% versus control. The shared passages still lost narrative meaning and looped under greedy decoding. The 14M model has therefore not met the intended coherence target, despite the likelihood improvements. These results do not establish that capacity is the cause; the following experiment tests one way of increasing it.
+
+The depth comparison expands the existing six-layer model to twelve layers while preserving its initial predictions with dropout disabled:
+
+| Branch | Layers | Parameters | Initialization |
+| --- | ---: | ---: | --- |
+| `control/` | 6 | 13,989,888 | Your shifted-window checkpoint |
+| `expanded/` | 12 | 24,636,672 | The same learned weights plus six initially identity blocks |
+
+The original blocks retain their order at positions 0, 2, 4, 6, 8, and 10. Each inserted block has random attention/MLP input weights and zero output projections, so its residual connections initially pass the input through unchanged. All layers then remain trainable. The tokenizer, embeddings, width, heads, context length, dropout, corpus, and splits are retained. This applies the residual-layer expansion principle in [Gesmundo and Maile, Section 3.6](https://arxiv.org/pdf/2308.06103); preservation of initial behavior does not guarantee better behavior after training.
+
+Run from the actual shifted checkpoint:
+
+```python
+NOTEBOOK_ARGS = [
+    "compare-depth",
+    "--continue-from", "/content/runs/christmas-window-comparison/shifted/best",
+    "--data-dir", "/content/data",
+    "--output-dir", "/content/runs/christmas-depth-comparison",
+    "--grow-layers", "12",
+    "--random-window-offsets",
+    "--max-steps", "1000",       # Per branch: 2,000 updates total
+    "--learning-rate", "1e-4",
+    "--warmup-ratio", "0.03",
+    "--eval-steps", "200",
+    "--sample-steps", "200",
+    "--sample-tokens", "64",
+]
+```
+
+Both branches use the same source checkpoint, shifted windows, shuffled example indices, training targets, optimizer settings, LR schedule, and update budget. The larger model costs more compute per update; this is an equal-token/update comparison, **not an equal-compute comparison**. It is also a test of this particular depth expansion and training budget, not a general verdict on model size. No external pretrained weights, new stories, or teacher-generated data are used.
+
+Before any expanded-model training, the script checks initial logits against the source on the three fixed openings and refuses to proceed if they differ beyond numerical tolerance. Both branches also evaluate their initial validation NLL, which should be approximately **3.799722** for the reported source checkpoint. The output records depth, parameter counts, layer mapping, the logit check, validation results, and the same train/validation passage probes. The selected weights remain ordinary `GPT2LMHeadModel` checkpoints; no special inference architecture is required.
+
+The final output prints `DEPTH COMPARISON` followed by `MATCHED PASSAGES`, with one train and one validation prefix and both branches' continuations side by side. Include both sections when sharing the result; the full set of probes remains in `comparison.json`.
+
+The source checkpoint remains intact. Each branch retains its initial weights if no new checkpoint improves validation, and neither evaluates the test set. Inspect the actual checkpoint and final passages for grammatical and narrative continuity. A likelihood improvement accompanied by the same incoherence does not justify calling the experiment successful. If the expanded branch retains its initial model, its extra layers have not earned their cost in this run.
+
+For a single expanded continuation, use `train --continue-from ... --grow-layers 12`. For resumption, replace `--continue-from` with `--resume`, **omit `--grow-layers`**, and retain the stage's numerical arguments, `--random-window-offsets`, and `--skip-test`. The saved expanded architecture and optimizer are restored without inserting more layers. Older runs without growth metadata remain compatible. As with the windowing comparison, resuming an individual branch does not regenerate the parent comparison report.
+
+To export the expanded candidate, pass its path to the existing exporter, for example `--model-dir /content/runs/christmas-depth-comparison/expanded/best`, with a new export output directory. Identity insertion uses standard GPT-2 blocks, so Hugging Face and GGUF export retain the ordinary model format.
+
+Implementation verification includes 28 passing tests, unchanged initial logits/samples/validation NLL, gradients and learning in the new blocks, and exact resumption of a short expanded-model run. The expanded 24.6M configuration was also exported as F16 (50.1 MB) and Q8 (27.2 MB); both loaded in llama.cpp and passed five tokenizer probes and three greedy first-token checks. These local checks used a briefly trained test checkpoint and do not establish prose quality on the user's trained model.
+
 ## Export weights and download GGUF
 
 After training, install the exporter dependencies. These preserve Colab's CUDA PyTorch installation.
