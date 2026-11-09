@@ -5,7 +5,7 @@ one code cell, and run it. Dependencies are installed and training starts using
 the source list embedded below. No repository clone or corpus.py is required.
 Edit NOTEBOOK_ARGS below to change options or resume a notebook run.
 
-The default pasted cell runs finetune-winter from the existing best 14M model:
+The default pasted cell runs a new finetune-winter v2 stage from project weights:
 selected pre-1920 winter domestic fiction plus original Christmas corpus replay.
 Keep the original prepared data and checkpoint available; nothing is rebuilt.
 Use --plan-only to inspect the budget, --smoke-test for a tiny execution check,
@@ -37,11 +37,11 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
-# Continue the latest 14M control with the approved winter-fiction expansion.
-# Default source: runs/christmas-scenes/control/best. Override --continue-from if
+# Prefer runs/christmas-winter/expanded/best if present, otherwise use the earlier
+# runs/christmas-scenes/control/best. Override --continue-from if
 # your files are on Drive. Add --resume after a disconnect (omit --continue-from).
 # For Colab persistence, set --data-dir and --output-dir to mounted Drive paths.
-NOTEBOOK_ARGS = ["finetune-winter", "--output-dir", "runs/christmas-winter"]
+NOTEBOOK_ARGS = ["finetune-winter", "--output-dir", "runs/christmas-winter-v2"]
 NOTEBOOK_REQUIREMENTS = [
     "torch>=2.6,<3", "transformers==4.57.6", "tokenizers==0.22.2", "accelerate==1.12.0",
     "huggingface-hub==0.36.2", "numpy>=1.26,<3", "requests>=2.32,<3", "safetensors>=0.4",
@@ -612,7 +612,499 @@ WINTER_SOURCES = [{'id': '32090',
                   'end': '^CLAMS\\.$',
                   'natural_end': True,
                   'sha256': '54a99effd6a912723207a097876c363b59be38f6a0bc3f815438524d4f181e8b',
-                  'words': 2526}]}]
+                  'words': 2526}]},
+ {'id': '24873',
+  'title': 'Lucy Maud Montgomery Short Stories, 1896 to 1901',
+  'author': 'L. M. Montgomery',
+  'url': 'https://www.gutenberg.org/cache/epub/24873/pg24873.txt',
+  'date': '1899 / 1901',
+  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the ebook release date.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/24873/pg24873-images.html'],
+  'note': 'Round 3: original prose; openings, middle passages, endings and seasonal context reviewed. '
+          'Individual story dates and caveats appear below.',
+  'selections': [{'title': 'A Christmas Inspiration',
+                  'start': '^A\\ Christmas\\ Inspiration$',
+                  'end': '^A\\ Christmas\\ Mistake$',
+                  'sha256': 'd2de073e6e35af98abbc64285ad786af0ab0f1030e55029509943f840316e6ee',
+                  'words': 2176,
+                  'year': 1901,
+                  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the '
+                                   'ebook release date.',
+                  'fit': 'Complete seasonal narrative with a concrete problem, actions and an explicit '
+                         'outcome.',
+                  'caveats': 'Period moralizing, occasional dialect and sentiment; several stories have '
+                             'larger casts. Do not let this author dominate the supplementary sampling pool.',
+                  'natural_end': True},
+                 {'title': 'A Christmas Mistake',
+                  'start': '^A\\ Christmas\\ Mistake$',
+                  'end': '^A\\ Strayed\\ Allegiance$',
+                  'sha256': '3895efec63f1d0dfabbb59d5ecd96d9fbc319e14b6d70ce197e70ed2eadc566d',
+                  'words': 2833,
+                  'year': 1899,
+                  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the '
+                                   'ebook release date.',
+                  'fit': 'Complete seasonal narrative with a concrete problem, actions and an explicit '
+                         'outcome.',
+                  'caveats': 'Period moralizing, occasional dialect and sentiment; several stories have '
+                             'larger casts. Do not let this author dominate the supplementary sampling pool.',
+                  'natural_end': True}]},
+ {'id': '24874',
+  'title': 'Lucy Maud Montgomery Short Stories, 1902 to 1903',
+  'author': 'L. M. Montgomery',
+  'url': 'https://www.gutenberg.org/cache/epub/24874/pg24874.txt',
+  'date': '1902 / 1903',
+  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the ebook release date.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/24874/pg24874-images.html'],
+  'note': 'Round 3: original prose; openings, middle passages, endings and seasonal context reviewed. '
+          'Individual story dates and caveats appear below.',
+  'selections': [{'title': "Aunt Cyrilla's Christmas Basket",
+                  'start': "^Aunt\\ Cyrilla's\\ Christmas\\ Basket$",
+                  'end': "^Davenport's\\ Story$",
+                  'sha256': 'b0347c627874f4f559fda48829218b690051e0ef3ab2ef1fee4a4af5601aadef',
+                  'words': 3159,
+                  'year': 1903,
+                  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the '
+                                   'ebook release date.',
+                  'fit': 'Complete seasonal narrative with a concrete problem, actions and an explicit '
+                         'outcome.',
+                  'caveats': 'Period moralizing, occasional dialect and sentiment; several stories have '
+                             'larger casts. Do not let this author dominate the supplementary sampling pool.',
+                  'natural_end': True},
+                 {'title': "The Josephs' Christmas",
+                  'start': "^The\\ Josephs'\\ Christmas$",
+                  'end': '^The\\ Magical\\ Bond\\ of\\ the\\ Sea$',
+                  'sha256': 'f935bfc53dd3efa7229c57363aade3b5bdb0eb0243a15f7fd6f023970263b284',
+                  'words': 2102,
+                  'year': 1902,
+                  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the '
+                                   'ebook release date.',
+                  'fit': 'Complete seasonal narrative with a concrete problem, actions and an explicit '
+                         'outcome.',
+                  'caveats': 'Period moralizing, occasional dialect and sentiment; several stories have '
+                             'larger casts. Do not let this author dominate the supplementary sampling pool.',
+                  'natural_end': True},
+                 {'title': "The Osbornes' Christmas",
+                  'start': "^The\\ Osbornes'\\ Christmas$",
+                  'end': '^The\\ Romance\\ of\\ Aunt\\ Beatrice$',
+                  'sha256': '90ccb9ca81800b2d5238b5aa006eb262ef7f23473ccf7f6237dd0eb7f8d9d700',
+                  'words': 1422,
+                  'year': 1903,
+                  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the '
+                                   'ebook release date.',
+                  'fit': 'Complete seasonal narrative with a concrete problem, actions and an explicit '
+                         'outcome.',
+                  'caveats': 'Period moralizing, occasional dialect and sentiment; several stories have '
+                             'larger casts. Do not let this author dominate the supplementary sampling pool.',
+                  'natural_end': True}]},
+ {'id': '24876',
+  'title': 'Lucy Maud Montgomery Short Stories, 1905 to 1906',
+  'author': 'L. M. Montgomery',
+  'url': 'https://www.gutenberg.org/cache/epub/24876/pg24876.txt',
+  'date': '1905 / 1906',
+  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the ebook release date.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/24876/pg24876-images.html'],
+  'note': 'Round 3: original prose; openings, middle passages, endings and seasonal context reviewed. '
+          'Individual story dates and caveats appear below.',
+  'selections': [{'title': "Bertie's New Year",
+                  'start': "^Bertie's\\ New\\ Year$",
+                  'end': '^Between\\ the\\ Hill\\ and\\ the\\ Valley$',
+                  'sha256': '389297b672f896648b6ec42693ef160109779f9119ee22380d76cad8b350739d',
+                  'words': 2649,
+                  'year': 1905,
+                  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the '
+                                   'ebook release date.',
+                  'fit': 'Complete seasonal narrative with a concrete problem, actions and an explicit '
+                         'outcome.',
+                  'caveats': 'Period moralizing, occasional dialect and sentiment; several stories have '
+                             'larger casts. Do not let this author dominate the supplementary sampling pool.',
+                  'natural_end': True},
+                 {'title': "Clorinda's Gifts",
+                  'start': "^Clorinda's\\ Gifts$",
+                  'end': "^Cyrilla's\\ Inspiration$",
+                  'sha256': '7af89389c008281387b72eaa57e7c322e398a294d764b37f58fd5b070062a069',
+                  'words': 1927,
+                  'year': 1906,
+                  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the '
+                                   'ebook release date.',
+                  'fit': 'Complete seasonal narrative with a concrete problem, actions and an explicit '
+                         'outcome.',
+                  'caveats': 'Period moralizing, occasional dialect and sentiment; several stories have '
+                             'larger casts. Do not let this author dominate the supplementary sampling pool.',
+                  'natural_end': True},
+                 {'title': "Ida's New Year Cake",
+                  'start': "^Ida's\\ New\\ Year\\ Cake$",
+                  'end': '^In\\ the\\ Old\\ Valley$',
+                  'sha256': '2b21f3e24c051a5b5ede2e64b032be83dcc8d041667594bace0f6363ccb64945',
+                  'words': 2164,
+                  'year': 1905,
+                  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the '
+                                   'ebook release date.',
+                  'fit': 'Complete seasonal narrative with a concrete problem, actions and an explicit '
+                         'outcome.',
+                  'caveats': 'Period moralizing, occasional dialect and sentiment; several stories have '
+                             'larger casts. Do not let this author dominate the supplementary sampling pool.',
+                  'natural_end': True},
+                 {'title': 'The Christmas Surprise at Enderly Road',
+                  'start': '^The\\ Christmas\\ Surprise\\ at\\ Enderly\\ Road$',
+                  'end': '^The\\ Dissipation\\ of\\ Miss\\ Ponsonby$',
+                  'sha256': '8a5713dd94648c38c7561a7bb847af64031fde5a67a11c825213f1b997a039dd',
+                  'words': 1748,
+                  'year': 1905,
+                  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the '
+                                   'ebook release date.',
+                  'fit': 'Complete seasonal narrative with a concrete problem, actions and an explicit '
+                         'outcome.',
+                  'caveats': 'Period moralizing, occasional dialect and sentiment; several stories have '
+                             'larger casts. Do not let this author dominate the supplementary sampling pool.',
+                  'natural_end': True},
+                 {'title': "The Falsoms' Christmas Dinner",
+                  'start': "^The\\ Falsoms'\\ Christmas\\ Dinner$",
+                  'end': '^The\\ Fraser\\ Scholarship$',
+                  'sha256': 'bee88cd02efbbebe46ee8fd3b97a0784935342e54e438cb770d377fe9440d359',
+                  'words': 2822,
+                  'year': 1906,
+                  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the '
+                                   'ebook release date.',
+                  'fit': 'Complete seasonal narrative with a concrete problem, actions and an explicit '
+                         'outcome.',
+                  'caveats': 'Period moralizing, occasional dialect and sentiment; several stories have '
+                             'larger casts. Do not let this author dominate the supplementary sampling pool.',
+                  'natural_end': True},
+                 {'title': 'The Light on the Big Dipper',
+                  'start': '^The\\ Light\\ on\\ the\\ Big\\ Dipper$',
+                  'end': '^The\\ Prodigal\\ Brother$',
+                  'sha256': 'e588163e27cb446cdb7876566121812512a9fe74a6c3939f6a8272b826191f95',
+                  'words': 2721,
+                  'year': 1906,
+                  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the '
+                                   'ebook release date.',
+                  'fit': 'Complete seasonal narrative with a concrete problem, actions and an explicit '
+                         'outcome.',
+                  'caveats': 'Period moralizing, occasional dialect and sentiment; several stories have '
+                             'larger casts. Lighthouse rescue rather than domestic routine.',
+                  'natural_end': True},
+                 {'title': 'The Unforgotten One',
+                  'start': '^The\\ Unforgotten\\ One$',
+                  'end': '^The\\ Wooing\\ of\\ Bessy$',
+                  'sha256': '403af9d5ba5a7145e450c5151ac3d31341fa35fb83c92662c485afc801148f5f',
+                  'words': 2261,
+                  'year': 1906,
+                  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the '
+                                   'ebook release date.',
+                  'fit': 'Complete seasonal narrative with a concrete problem, actions and an explicit '
+                         'outcome.',
+                  'caveats': 'Period moralizing, occasional dialect and sentiment; several stories have '
+                             'larger casts. Bereavement and a cemetery visit.',
+                  'natural_end': True}]},
+ {'id': '24878',
+  'title': 'Lucy Maud Montgomery Short Stories, 1909 to 1922',
+  'author': 'L. M. Montgomery',
+  'url': 'https://www.gutenberg.org/cache/epub/24878/pg24878.txt',
+  'date': '1909 / 1910',
+  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the ebook release date.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/24878/pg24878-images.html'],
+  'note': 'Round 3: original prose; openings, middle passages, endings and seasonal context reviewed. '
+          'Individual story dates and caveats appear below.',
+  'selections': [{'title': 'Christmas at Red Butte',
+                  'start': '^Christmas\\ at\\ Red\\ Butte$',
+                  'end': '^How\\ We\\ Went\\ to\\ the\\ Wedding$',
+                  'sha256': '0529eb1006e1a37ecaaad0a2d0b4fccb65a7bf31f971404cfb6ed7ff13f35809',
+                  'words': 2896,
+                  'year': 1909,
+                  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the '
+                                   'ebook release date.',
+                  'fit': 'Complete seasonal narrative with a concrete problem, actions and an explicit '
+                         'outcome.',
+                  'caveats': 'Period moralizing, occasional dialect and sentiment; several stories have '
+                             'larger casts. Do not let this author dominate the supplementary sampling pool.',
+                  'natural_end': True},
+                 {'title': "Uncle Richard's New Year's Dinner",
+                  'start': "^Uncle\\ Richard's\\ New\\ Year's\\ Dinner$",
+                  'end': '^White\\ Magic$',
+                  'sha256': 'd67ae1fd9e7edd004fa8c4ceb31d9e8e170a4dd3346dd681dd5cb530020f3592',
+                  'words': 1515,
+                  'year': 1910,
+                  'date_evidence': 'Individual story year in the Gutenberg collection contents; not the '
+                                   'ebook release date.',
+                  'fit': 'Complete seasonal narrative with a concrete problem, actions and an explicit '
+                         'outcome.',
+                  'caveats': 'Period moralizing, occasional dialect and sentiment; several stories have '
+                             'larger casts. Do not let this author dominate the supplementary sampling pool.',
+                  'natural_end': True}]},
+ {'id': '19766',
+  'title': 'Young Lucretia and Other Stories',
+  'author': 'Mary Eleanor Wilkins Freeman',
+  'url': 'https://www.gutenberg.org/cache/epub/19766/pg19766.txt',
+  'date': '1892',
+  'date_evidence': 'Collection copyright 1892; transcribed title page 1893. Individual first appearances not '
+                   'established.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/19766/pg19766-images.html'],
+  'note': 'Round 3: original prose; openings, middle passages, endings and seasonal context reviewed. '
+          'Individual story dates and caveats appear below.',
+  'selections': [{'title': 'Young Lucretia',
+                  'start': '^YOUNG\\ LUCRETIA\\n\\n',
+                  'end': '^HOW\\ FIDELIA\\ WENT\\ TO\\ THE\\ STORE$',
+                  'sha256': '6d1edf497889ead542ea24c4daa7adb9cf9d985f7e5fbd2c48039afb2519c8c8',
+                  'words': 3808,
+                  'year': 1892,
+                  'date_evidence': 'Collection copyright 1892; transcribed title page 1893. Individual first '
+                                   'appearances not established.',
+                  'fit': 'Child/family problem with a clear resolution; gifts, a lost child, or missing '
+                         'holiday food.',
+                  'caveats': 'Frequent New England dialect. Thanksgiving selection is late-autumn domestic '
+                             'fiction.',
+                  'natural_end': True},
+                 {'title': 'Where The Christmas-Tree Grew',
+                  'start': '^WHERE\\ THE\\ CHRISTMAS\\-TREE\\ GREW\\n\\n',
+                  'end': "^WHERE\\ SARAH\\ JANE'S\\ DOLL\\ WENT$",
+                  'sha256': 'c2211c844fbf6764407e61a558cde5d88fc0e401d88111a7e855660c42d28b2b',
+                  'words': 2933,
+                  'year': 1892,
+                  'date_evidence': 'Collection copyright 1892; transcribed title page 1893. Individual first '
+                                   'appearances not established.',
+                  'fit': 'Child/family problem with a clear resolution; gifts, a lost child, or missing '
+                         'holiday food.',
+                  'caveats': 'Frequent New England dialect. Thanksgiving selection is late-autumn domestic '
+                             'fiction.',
+                  'natural_end': True},
+                 {'title': 'Ann Mary Her Two Thanksgivings',
+                  'start': '^ANN\\ MARY\\ HER\\ TWO\\ THANKSGIVINGS\\n\\n',
+                  'end': "^ANN\\ LIZY'S\\ PATCHWORK$",
+                  'sha256': 'cf183739245fd09e3d04ff3c6d7075a16bd4b65208c5e3a9fd40b396362b98e4',
+                  'words': 5525,
+                  'year': 1892,
+                  'date_evidence': 'Collection copyright 1892; transcribed title page 1893. Individual first '
+                                   'appearances not established.',
+                  'fit': 'Child/family problem with a clear resolution; gifts, a lost child, or missing '
+                         'holiday food.',
+                  'caveats': 'Frequent New England dialect. Thanksgiving selection is late-autumn domestic '
+                             'fiction.',
+                  'natural_end': True}]},
+ {'id': '17888',
+  'title': 'Comfort Pease and her Gold Ring',
+  'author': 'Mary Eleanor Wilkins Freeman',
+  'url': 'https://www.gutenberg.org/cache/epub/17888/pg17888.txt',
+  'date': '1895',
+  'date_evidence': 'Transcribed title page MDCCCXCV (1895).',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/17888/pg17888-images.html'],
+  'note': 'Round 3: original prose; openings, middle passages, endings and seasonal context reviewed. '
+          'Individual story dates and caveats appear below.',
+  'selections': [{'title': 'Comfort Pease and her Gold Ring',
+                  'start': '^One of the first things which Comfort remembered',
+                  'end': '\\Z',
+                  'sha256': '15f1bbf75d603b207bfc67d24f7df90a3298364658b01113c18e145445f515dd',
+                  'words': 11043,
+                  'year': 1895,
+                  'date_evidence': 'Transcribed title page MDCCCXCV (1895).',
+                  'fit': 'One sustained causal plot: a child borrows, loses, searches for, and confesses '
+                         'about a ring, in snowy school/home settings.',
+                  'caveats': 'Longer than a short scene; dialect and explicit moral instruction. Final '
+                             'school coda is three months later.',
+                  'natural_end': True}]},
+ {'id': '17530',
+  'title': "Maida's Little Shop",
+  'author': 'Inez Haynes Gillmore',
+  'url': 'https://www.gutenberg.org/cache/epub/17530/pg17530.txt',
+  'date': '1909',
+  'date_evidence': 'Copyright 1909 printed in the transcribed edition; later-series advertising excluded.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/17530/pg17530-images.html'],
+  'note': 'Round 3: original prose; openings, middle passages, endings and seasonal context reviewed. '
+          'Individual story dates and caveats appear below.',
+  'selections': [{'title': "Maida's Little Shop, XII-XIV",
+                  'start': '^ CHAPTER XII: THE FIRST SNOW$',
+                  'end': '^Yes, Maida did come back\\.',
+                  'sha256': '1619035044a94059d8a1d8b382901e8207f6825afbf5a0f1df13804cc8a3c1e9',
+                  'words': 9127,
+                  'year': 1909,
+                  'date_evidence': 'Copyright 1909 printed in the transcribed edition; later-series '
+                                   'advertising excluded.',
+                  'fit': 'The First Snow, The Fair, Christmas Happenings: snow play, making and selling '
+                         'gifts, and a Christmas reunion.',
+                  'caveats': 'Prior cast context; Granny uses dialect. Stops after the narrative farewell '
+                             'and before the sequel advertisement.',
+                  'natural_end': True}]},
+ {'id': '34378',
+  'title': 'Hans Brinker; Or, The Silver Skates',
+  'author': 'Mary Mapes Dodge',
+  'url': 'https://www.gutenberg.org/cache/epub/34378/pg34378.txt',
+  'date': '1865',
+  'date_evidence': 'First publication 1865 in the Kalamazoo Public Library catalog; Gutenberg preface/letter '
+                   'itself dated 1873. Exact printing date of the undated Cooke-illustrated transcription '
+                   'not established.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/34378/pg34378-images.html',
+                   'https://www.kpl.gov/catalog/item/?i=ent%3A%2F%2FERC_215_8682%2F0%2F215_8682%3AHOOPLA%3A13249740'],
+  'note': 'Round 3: original prose; openings, middle passages, endings and seasonal context reviewed. '
+          'Individual story dates and caveats appear below.',
+  'selections': [{'title': 'Hans Brinker, I: Hans and Gretel',
+                  'start': '^I\\n\\nHANS AND GRETEL$',
+                  'end': '^II$',
+                  'sha256': 'a243865e7e00945eba07e1dab343fc5a6465b76436ba55e8160d9f907601e239',
+                  'words': 1245,
+                  'year': 1865,
+                  'date_evidence': 'First publication 1865 in the Kalamazoo Public Library catalog; '
+                                   'Gutenberg preface/letter itself dated 1873. Exact printing date of the '
+                                   'undated Cooke-illustrated transcription not established.',
+                  'fit': 'December skating, obtaining skates, family care and the Saint Nicholas '
+                         'celebration.',
+                  'caveats': 'Some authorial addresses, exposition and archaic pronouns remain. '
+                             'Historical/geographical chapters omitted.',
+                  'natural_end': False},
+                 {'title': 'Hans Brinker, III-VII',
+                  'start': '^III\\n\\nTHE SILVER SKATES$',
+                  'end': '^VIII$',
+                  'sha256': '8f313ade46f1a7c0b4cb3668ed943d69796e73b88beefdf0ca1bc78692197298',
+                  'words': 7966,
+                  'year': 1865,
+                  'date_evidence': 'First publication 1865 in the Kalamazoo Public Library catalog; '
+                                   'Gutenberg preface/letter itself dated 1873. Exact printing date of the '
+                                   'undated Cooke-illustrated transcription not established.',
+                  'fit': 'December skating, obtaining skates, family care and the Saint Nicholas '
+                         'celebration.',
+                  'caveats': 'Some authorial addresses, exposition and archaic pronouns remain. '
+                             'Historical/geographical chapters omitted.',
+                  'natural_end': False},
+                 {'title': 'Hans Brinker, IX: The Festival of Saint Nicholas',
+                  'start': '^IX\\n\\nTHE FESTIVAL OF SAINT NICHOLAS$',
+                  'end': '^X$',
+                  'sha256': 'a0def05504d5a16dd64d422a5593b5967802f7b43e4d08b25b06bdacaf4d3492',
+                  'words': 2569,
+                  'year': 1865,
+                  'date_evidence': 'First publication 1865 in the Kalamazoo Public Library catalog; '
+                                   'Gutenberg preface/letter itself dated 1873. Exact printing date of the '
+                                   'undated Cooke-illustrated transcription not established.',
+                  'fit': 'December skating, obtaining skates, family care and the Saint Nicholas '
+                         'celebration.',
+                  'caveats': 'Some authorial addresses, exposition and archaic pronouns remain. '
+                             'Historical/geographical chapters omitted.',
+                  'natural_end': False}]},
+ {'id': '76681',
+  'title': "Liliecrona's home",
+  'author': 'Selma Lagerlöf',
+  'url': 'https://www.gutenberg.org/cache/epub/76681/pg76681.txt',
+  'date': '1914',
+  'date_evidence': 'This English translation by Anna Barwell has a New York title page dated MCMXIV (1914).',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/76681/pg76681-images.html'],
+  'note': 'Round 3: original prose; openings, middle passages, endings and seasonal context reviewed. '
+          'Individual story dates and caveats appear below.',
+  'selections': [{'title': "Liliecrona's Home, I-II",
+                  'start': '^CHAPTER I$',
+                  'end': '^CHAPTER III$',
+                  'sha256': 'c88873d273fcf879bc8234c77d766e6affefcdc18b019e39cf69b3fcdb45baaf',
+                  'words': 6699,
+                  'year': 1914,
+                  'date_evidence': 'This English translation by Anna Barwell has a New York title page dated '
+                                   'MCMXIV (1914).',
+                  'fit': 'Christmas storm, seeking shelter, and a child entering a household; next-morning '
+                         'spinning-room scene.',
+                  'caveats': 'Translated prose and larger novel setup; threatened exposure and an oppressive '
+                             'household. Not a complete novel arc.',
+                  'natural_end': False}]},
+ {'id': '56583',
+  'title': 'Patty in the City',
+  'author': 'Carolyn Wells',
+  'url': 'https://www.gutenberg.org/cache/epub/56583/pg56583.txt',
+  'date': '1905',
+  'date_evidence': 'Copyright 1905 in the transcribed front matter.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/56583/pg56583-images.html'],
+  'note': 'Round 3: original prose; openings, middle passages, endings and seasonal context reviewed. '
+          'Individual story dates and caveats appear below.',
+  'selections': [{'title': 'Patty in the City, XXIII: Christmas',
+                  'start': '^ CHAPTER XXIII$',
+                  'end': '^ \\* \\* \\* \\* \\*\\n\\n “_The Books you like to read',
+                  'sha256': '9e6bc09d5a2f863e78106acc6f83ef68a0001f1619deaef26fb25788427ecf14',
+                  'words': 2104,
+                  'year': 1905,
+                  'date_evidence': 'Copyright 1905 in the transcribed front matter.',
+                  'fit': 'Complete final chapter: family Christmas visits, presents and conversation.',
+                  'caveats': 'Large established cast and romance references. Publisher lists excluded; same '
+                             'series as an original training book.',
+                  'natural_end': True}]},
+ {'id': '316',
+  'title': 'The Golden Road',
+  'author': 'L. M. Montgomery',
+  'url': 'https://www.gutenberg.org/cache/epub/316/pg316.txt',
+  'date': '1913',
+  'date_evidence': 'A separate Gutenberg Canada transcription reproduces copyright 1913 and First '
+                   'Impression, August 1913.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/316/pg316-images.html',
+                   'https://gutenbergcanada.ca/ebooks/montgomery-golden/montgomery-golden-00-h-dir/montgomery-golden-00-h.html'],
+  'note': 'Round 3: original prose; openings, middle passages, endings and seasonal context reviewed. '
+          'Individual story dates and caveats appear below.',
+  'selections': [{'title': 'The Golden Road, III-IV',
+                  'start': '^CHAPTER III\\. THE CHRISTMAS HARP$',
+                  'end': '^CHAPTER V\\.',
+                  'sha256': 'e400f93d211e63356549b9cc6b00ed7890e5153981aa081ba2e660132e7f16f3',
+                  'words': 6331,
+                  'year': 1913,
+                  'date_evidence': 'A separate Gutenberg Canada transcription reproduces copyright 1913 and '
+                                   'First Impression, August 1913.',
+                  'fit': 'Christmas preparations and presents followed by snowy New Year resolutions.',
+                  'caveats': 'Many children, an embedded legend, verse and reflective narration; use after '
+                             'the simpler complete stories.',
+                  'natural_end': False}]},
+ {'id': '544',
+  'title': "Anne's House of Dreams",
+  'author': 'L. M. Montgomery',
+  'url': 'https://www.gutenberg.org/cache/epub/544/pg544.txt',
+  'date': '1917',
+  'date_evidence': 'University of Pennsylvania Online Books Page lists the work in a 1917 edition; the '
+                   'Montgomery bibliography documents advertisements and reviews from August 1917.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/544/pg544-images.html',
+                   'https://onlinebooks.library.upenn.edu/webbin/book/lookupname?key=Montgomery%2C+L.+M.+%28Lucy+Maud%29%2C+1874-1942',
+                   'https://lmmonline.org/bibliography/magazine-items-1/'],
+  'note': 'Round 3: original prose; openings, middle passages, endings and seasonal context reviewed. '
+          'Individual story dates and caveats appear below.',
+  'selections': [{'title': "Anne's House of Dreams, 15-17",
+                  'start': '^CHAPTER 15$',
+                  'end': '^CHAPTER 18$',
+                  'sha256': '6735357051600b447ee26277f9a4a583be495b36101f357a192e1a87bd7962bf',
+                  'words': 6339,
+                  'year': 1917,
+                  'date_evidence': 'University of Pennsylvania Online Books Page lists the work in a 1917 '
+                                   'edition; the Montgomery bibliography documents advertisements and '
+                                   'reviews from August 1917.',
+                  'fit': "Christmas at Four Winds, New Year's Eve at the Light, A Four Winds Winter: visits, "
+                         'meals and household conversations.',
+                  'caveats': 'Adult cast, embedded reminiscences and continuing-novel relationships; more '
+                             "demanding than the children's short stories.",
+                  'natural_end': False}]},
+ {'id': '45',
+  'title': 'Anne of Green Gables',
+  'author': 'L. M. Montgomery',
+  'url': 'https://www.gutenberg.org/cache/epub/45/pg45.txt',
+  'date': '1908',
+  'date_evidence': 'Separate illustrated Gutenberg edition 64365 reproduces copyright 1908 and '
+                   'August/September 1908 impressions.',
+  'date_sources': ['https://www.gutenberg.org/cache/epub/45/pg45-images.html',
+                   'https://www.gutenberg.org/cache/epub/64365/pg64365-images.html'],
+  'note': 'Round 3: original prose; openings, middle passages, endings and seasonal context reviewed. '
+          'Individual story dates and caveats appear below.',
+  'selections': [{'title': 'Anne of Green Gables, XVIII-XIX',
+                  'start': '^CHAPTER XVIII\\. Anne to the Rescue$',
+                  'end': '^CHAPTER XX\\.',
+                  'sha256': '3d5036434ce9d6c8f5b279e4c4c27a1681691bc1dc2c2eeee323f46b32b8d95d',
+                  'words': 7434,
+                  'year': 1908,
+                  'date_evidence': 'Separate illustrated Gutenberg edition 64365 reproduces copyright 1908 '
+                                   'and August/September 1908 impressions.',
+                  'fit': 'Winter illness/rescue and a birthday visit; Christmas concert preparations and '
+                         "Matthew's gift of a dress.",
+                  'caveats': 'Prior novel context, longer dialogue and a historical medical scene; keep one '
+                             'copy of the puffed-sleeves chapter.',
+                  'natural_end': False},
+                 {'title': 'Anne of Green Gables, XXIV-XXV',
+                  'start': '^CHAPTER XXIV\\. Miss Stacy and Her Pupils Get Up a Concert$',
+                  'end': '^CHAPTER XXVI\\.',
+                  'sha256': '1f4acec3902158db742516de9e7b11a08c0f4fc2cb854fe9ba21e10cb4c3bd82',
+                  'words': 4991,
+                  'year': 1908,
+                  'date_evidence': 'Separate illustrated Gutenberg edition 64365 reproduces copyright 1908 '
+                                   'and August/September 1908 impressions.',
+                  'fit': 'Winter illness/rescue and a birthday visit; Christmas concert preparations and '
+                         "Matthew's gift of a dress.",
+                  'caveats': 'Prior novel context, longer dialogue and a historical medical scene; keep one '
+                             'copy of the puffed-sleeves chapter.',
+                  'natural_end': False}]}]
 
 def write_json(path, value):
     path = Path(path)
@@ -883,7 +1375,7 @@ class BookWindows:
     def __init__(self, path, block_size, limit=None, random_offsets=False, seed=42):
         import numpy as np
         self.books, self.book_ids, self.windows = [], [], []
-        self.block_size = block_size
+        self.block_size = self.target_block_size = block_size
         self.random_offsets, self.seed = random_offsets, seed
         for line in Path(path).read_text().splitlines():
             book = json.loads(line)
@@ -903,7 +1395,7 @@ class BookWindows:
     def set_training_epoch(self, epoch):
         """Deterministic per-book shifts; independent of global training RNG."""
         self.epoch = int(epoch)
-        span = self.block_size-1
+        span = self.target_block_size-1
         self.offsets = [int.from_bytes(hashlib.sha256(
             f"{self.seed}:{self.epoch}:{book_id}".encode()).digest()[:8], "big") % (2*span+1)-span
             for book_id in self.book_ids] if self.random_offsets else [0]*len(self.books)
@@ -911,13 +1403,45 @@ class BookWindows:
     def __len__(self):
         return len(self.windows)
 
-    def __getitem__(self, index):
+    def target_window(self, index):
         book, start = self.windows[index]
-        if self.random_offsets and start > 0 and start+self.block_size < len(self.books[book]):
+        if self.random_offsets and start > 0 and start+self.target_block_size < len(self.books[book]):
             # Keep the original first/last windows (and all EOS occurrences).
             # Interior windows stay contiguous within their original book.
-            start = max(1, min(start+self.offsets[book], len(self.books[book])-self.block_size-1))
-        return {"input_ids": self.books[book][start:start+self.block_size].tolist()}
+            start = max(1, min(start+self.offsets[book], len(self.books[book])-self.target_block_size-1))
+        return book, start, min(start+self.target_block_size, len(self.books[book]))
+
+    def scored_targets(self, index):
+        _, start, end = self.target_window(index)
+        return end-start-1
+
+    def __getitem__(self, index):
+        book, start, end = self.target_window(index)
+        return {"input_ids": self.books[book][start:end].tolist()}
+
+
+class ContextBookWindows(BookWindows):
+    """Predict a target span with additional preceding text from the SAME document.
+
+    At context 512 and lookback 128, each full row predicts 383 targets. The
+    preceding 129 tokens (where available) are visible but their labels masked.
+    Fixed windows cover each original target exactly once. Shifted training
+    windows retain the prior sampling policy and can repeat/omit interior targets
+    in a pass; prepending context itself never adds duplicate loss targets.
+    """
+    def __init__(self, path, block_size, limit=None, random_offsets=False, seed=42, lookback=128):
+        if not 0 <= lookback <= block_size-2:
+            raise ValueError("Lookback must leave at least one causal target")
+        super().__init__(path, block_size-lookback, limit, random_offsets, seed)
+        self.block_size, self.lookback = block_size, lookback
+
+    def __getitem__(self, index):
+        book, start, end = self.target_window(index)
+        begin = max(0, start-self.lookback)
+        ids = self.books[book][begin:end].tolist()
+        labels = ids.copy()
+        labels[:start-begin+1] = [-100]*(start-begin+1)
+        return {"input_ids": ids, "labels": labels}
 
 
 def window_epoch_callback(dataset):
@@ -931,7 +1455,7 @@ def window_epoch_callback(dataset):
             dataset.set_training_epoch(int(state.epoch or 0))
             if dataset.random_offsets:
                 print(f"Training window offsets: epoch {dataset.epoch}; "
-                      "book boundaries and example lengths preserved.", flush=True)
+                      "book boundaries and target counts preserved.", flush=True)
 
     return WindowEpochCallback()
 
@@ -1379,6 +1903,12 @@ def training(args):
                                     random_offsets=True, seed=args.seed)
         # Check copying against BOTH pools, including for baseline/control prose.
         review_training_data = combined_book_windows(review_training_data, supplementary)
+        # Both arms use the same context policy; review NLL retains the old windows.
+        lookback = winter_recipe.get("lookback", 0)
+        train_set = ContextBookWindows(data/"train.jsonl", args.block_size, args.train_limit,
+                                       random_offsets=True, seed=args.seed, lookback=lookback)
+        supplementary = ContextBookWindows(args.winter_train_path, args.block_size, args.train_limit,
+                                           random_offsets=True, seed=args.seed, lookback=lookback)
         if winter_recipe["treatment"]:
             train_set = WinterReplayDataset(train_set, supplementary, args.seed)
     val_set = BookWindows(data / "validation.jsonl", args.block_size, args.eval_limit)
@@ -1680,8 +2210,7 @@ def training_exposure(dataset, effective_batch, steps, seed):
     import torch
     if isinstance(dataset, (SceneReplayDataset, WinterReplayDataset)):
         return dataset.exposure(effective_batch, steps, seed)
-    lengths = [min(dataset.block_size, len(dataset.books[book])-start)-1
-               for book, start in dataset.windows]
+    lengths = [dataset.scored_targets(i) for i in range(len(dataset))]
     per_epoch = math.ceil(len(lengths)/effective_batch)
     epochs, remainder = divmod(steps, per_epoch)
     generator = torch.Generator().manual_seed(seed+epochs)
@@ -1860,6 +2389,62 @@ def score_training_subset(model, tokenizer, dataset, limit=1024, batch_size=8):
     return {"nll": total/targets, "scored_tokens": targets, "windows": len(fixed), "dropout_disabled": True}
 
 
+def score_context_use(model, benchmark):
+    """Paired teacher-forced validation diagnostic; never a coherence score.
+
+    Keep reference tokens and positional indices fixed, changing only the prefix
+    to text from a different validation book. No reference is used as generation
+    input. Positive gain can reflect vocabulary/topic cues as well as continuity.
+    """
+    import torch
+    prompts = benchmark["prompts"]
+    count = benchmark["context_probe_tokens"]
+    records, skipped = [], []
+    totals = [0., 0.]
+    scored = 0
+    was_training = model.training
+    model.eval()
+    try:
+        with torch.inference_mode():
+            for i, prompt in enumerate(prompts):
+                prefix = prompt["input_ids"]
+                reference = prompt["reference_ids"][:count]
+                other = next((prompts[(i+j) % len(prompts)] for j in range(1, len(prompts))
+                              if prompts[(i+j) % len(prompts)]["book_id"] != prompt["book_id"]
+                              and len(prompts[(i+j) % len(prompts)]["input_ids"])
+                              + len(prompts[(i+j) % len(prompts)]["reference_ids"]) >= len(prefix)), None)
+                if other is None or not reference:
+                    skipped.append(prompt["prompt_id"])
+                    continue
+                # Other-book reference is only source text for the unrelated prefix.
+                unrelated = (other["input_ids"]+other["reference_ids"])[:len(prefix)]
+                inputs = torch.tensor([prefix+reference, unrelated+reference], device=model.device)
+                labels = inputs.clone()
+                labels[:, :len(prefix)] = -100
+                logits = model(inputs, use_cache=False).logits
+                sums = loss_sums(logits, labels).double().cpu()
+                assert sums[:, 1].tolist() == [len(reference), len(reference)]
+                values = [float(sums[k, 0])/len(reference) for k in (0, 1)]
+                records.append({"prompt_id": prompt["prompt_id"], "book_id": prompt["book_id"],
+                                "unrelated_prompt_id": other["prompt_id"], "unrelated_book_id": other["book_id"],
+                                "prefix_tokens": len(prefix), "reference_tokens": len(reference),
+                                "true_prefix_nll": values[0], "unrelated_prefix_nll": values[1],
+                                "context_gain_nll": values[1]-values[0]})
+                for k in (0, 1):
+                    totals[k] += float(sums[k, 0])
+                scored += len(reference)
+    finally:
+        model.train(was_training)
+    return {"scored_tokens_per_condition": scored, "paired_prompts": len(records),
+            "true_prefix_nll": totals[0]/scored if scored else None,
+            "unrelated_prefix_nll": totals[1]/scored if scored else None,
+            "context_gain_nll": (totals[1]-totals[0])/scored if scored else None,
+            "skipped_prompt_ids": skipped, "pairs": records, "dropout_disabled": True,
+            "interpretation": "Positive gain means the real prefix lowers reference NLL relative to an "
+                              "unrelated equal-length prefix. Includes lexical/topic cues; neither sustained "
+                              "coherence nor a checkpoint-selection rule. Teacher forcing, not generation."}
+
+
 def run_capacity_review(model, tokenizer, benchmark, training_data, destination, step, nll):
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
@@ -1895,9 +2480,11 @@ def run_capacity_review(model, tokenizer, benchmark, training_data, destination,
     for result, match in zip(results+short_results, copied_training_spans(generated_ids, training_data)):
         result["training_copy"] = match
         result["longest_training_copy_tokens"] = match["matched_tokens"]
+    context_use = score_context_use(model, benchmark) if benchmark.get("context_probe_tokens") else None
     report = {"step": step, "validation_nll": nll, "benchmark_sha256": json_digest(benchmark),
               "test_evaluated": False, "fixed_training_subset": training_score,
               "fixed_supplementary_subset": supplementary_score,
+              "context_use": context_use,
               "samples": results, "runtime_seconds": time.monotonic()-start,
               "copy_search": "Exact generated-only token spans >=32, searched within training books. "
               "Zero means no match detected by this rule, not proof of originality.",
@@ -2661,7 +3248,7 @@ def screen_winter_units(units, original):
 
 
 def prepare_winter_material(data, cache, tokenizer, signature, offline=False):
-    """Download all 24 approved sources, select exact prose, and freeze training IDs."""
+    """Download the approved inline sources, select exact prose, and freeze training IDs."""
     units, records = [], []
     for source in WINTER_SOURCES:
         raw = download_book(source["url"], cache, offline)
@@ -2672,7 +3259,8 @@ def prepare_winter_material(data, cache, tokenizer, signature, offline=False):
             units.append({"id": f"winter-{source['id']}-{number}", "source_id": source["id"],
                           "text": text, "sha256": spec["sha256"], "natural_end": spec["natural_end"],
                           "words": len(text.split()), "clean_start_character": start,
-                          "clean_end_character_exclusive": end})
+                          "clean_end_character_exclusive": end,
+                          **{k: spec[k] for k in ("title", "year", "date_evidence", "fit", "caveats") if k in spec}})
         print(f"[winter source {len(records)}/{len(WINTER_SOURCES)}] {metadata['title']}", flush=True)
     original = []
     for split in ("train", "validation", "test"):
@@ -2691,7 +3279,7 @@ def prepare_winter_material(data, cache, tokenizer, signature, offline=False):
         lines.append(json.dumps({"id": row["id"], "ids": ids}))
         selection.append({k: v for k, v in row.items() if k != "text"} | {"target_tokens": len(ids)-1})
     encoded = "\n".join(lines)+"\n"
-    manifest = {"version": 1, "catalog_sha256": json_digest(WINTER_SOURCES),
+    manifest = {"version": 2, "catalog_sha256": json_digest(WINTER_SOURCES),
                 "base_dataset_sha256": signature, "train_sha256": hashlib.sha256(encoded.encode()).hexdigest(),
                 "sources": records, "accepted": selection, "excluded": excluded,
                 "words": sum(r["words"] for r in selection),
@@ -2723,8 +3311,8 @@ class WinterReplayDataset:
     """Half new / half original windows, with all original windows once per epoch.
 
     New windows cycle without replacement; each cycle gets fresh book offsets.
-    All causal targets are scored (no prefix masking). Tail lengths cause small
-    differences from a 50% target share, reported exactly by exposure().
+    The context look-back has no loss labels. Tail lengths cause small differences
+    from a 50% target share, reported exactly by exposure().
     """
     def __init__(self, replay, supplementary, seed=42):
         if replay.block_size != supplementary.block_size:
@@ -2772,7 +3360,8 @@ class WinterReplayDataset:
                 self.set_training_epoch(epoch)
                 order = torch.randperm(len(self), generator=torch.Generator().manual_seed(seed+epoch)).tolist()
                 for index in order[:min(remaining, per_epoch)*effective_batch]:
-                    targets = len(self[index]["input_ids"])-1
+                    row = self[index]
+                    targets = sum(x != -100 for x in row.get("labels", row["input_ids"])[1:])
                     kind = "replay" if index % 2 else "new"
                     result[kind+"_examples"] += 1
                     result[kind+"_targets"] += targets
@@ -2785,6 +3374,11 @@ class WinterReplayDataset:
         result["new_fraction_of_scored_targets"] = result["new_targets"]/max(1, result["scored_targets"])
         result["new_corpus_target_pass_equivalents"] = result["new_targets"]/unique_targets
         return result
+
+
+def default_winter_source(root):
+    latest = Path(root)/"runs/christmas-winter/expanded/best"
+    return latest if latest.is_dir() else Path(root)/"runs/christmas-scenes/control/best"
 
 
 def finetune_winter(args):
@@ -2815,7 +3409,7 @@ def finetune_winter(args):
     prepare(args)
     signature = dataset_signature(data)
     tokenizer = AutoTokenizer.from_pretrained(data/"tokenizer", local_files_only=True)
-    source = Path(args.continue_from or ROOT/"runs/christmas-scenes/control/best").resolve()
+    source = Path(args.continue_from or default_winter_source(ROOT)).resolve()
     snapshot, material = out/"starting_model", out/"material"
     if out.resolve() == source or out.resolve() in source.parents:
         raise ValueError("Winter output must not contain or replace its source checkpoint")
@@ -2828,7 +3422,9 @@ def finetune_winter(args):
         if (manifest["base_dataset_sha256"] != signature
                 or manifest["catalog_sha256"] != json_digest(WINTER_SOURCES)
                 or manifest["train_sha256"] != hashlib.sha256(encoded.encode()).hexdigest()):
-            raise ValueError("Frozen winter material, catalog or base data changed")
+            raise ValueError("Frozen winter material, catalog or base data changed. Start v2 in a NEW output "
+                             "directory with --continue-from pointing to the previous selected weights; "
+                             "an old optimizer run cannot be resumed with a different corpus/recipe.")
     else:
         if args.smoke_test:
             set_seed(args.model_seed)
@@ -2841,9 +3437,10 @@ def finetune_winter(args):
         else:
             if not source.is_dir():
                 raise ValueError(f"Source weights not found: {source}. Set --continue-from to an existing "
-                                 "project best/ directory, preferably christmas-scenes/control/best. "
+                                 "project best/ directory (the latest winter best or scenes/control/best). "
                                  "Reports ZIPs do not contain weights.")
             model = load_continuation(source, tokenizer, signature)
+            print(f"Winter continuation source: {source}", flush=True)
             source_description = {"kind": "existing_project_model", "path": str(source),
                                   "parameters": model.num_parameters()}
             provenance = next((source/name for name in ("training_summary.json", "provenance.json")
@@ -2869,32 +3466,40 @@ def finetune_winter(args):
     benchmark = make_capacity_benchmark(data, tokenizer, signature, args.benchmark_prompts,
                                        args.seed, generation_tokens=args.benchmark_tokens)
     benchmark["short_tokens"] = min(96, args.benchmark_tokens)
+    benchmark["context_probe_tokens"] = min(64, args.benchmark_tokens)
+    benchmark["context_probe_version"] = 1
     if args.smoke_test:
         benchmark["training_eval_windows"] = 16
-    recipe = {"version": 1, "manifest_sha256": json_digest(manifest),
+    recipe = {"version": 2, "manifest_sha256": json_digest(manifest),
               "train_sha256": manifest["train_sha256"], "new_example_fraction": .5,
-              "prefix_loss": "all_causal_targets", "false_end_targets": False}
+              "lookback": args.winter_lookback,
+              "prefix_loss": "preceding_context_only_masked; all_target_span_tokens_scored", "false_end_targets": False}
     settings = {k: getattr(args, k) for k in (
         "seed", "model_seed", "batch_size", "accumulation", "learning_rate", "warmup_ratio", "max_steps",
         "eval_steps", "sample_steps", "sample_tokens", "benchmark_steps", "precision", "smoke_test",
-        "train_limit", "eval_limit", "with_control")}
-    plan = {"version": 1, "source": source_description, "starting_weights_sha256": digest.hexdigest(),
+        "train_limit", "eval_limit", "with_control", "winter_lookback")}
+    plan = {"version": 2, "source": source_description, "starting_weights_sha256": digest.hexdigest(),
             "dataset_sha256": signature, "recipe": recipe, "settings": settings,
             "benchmark_sha256": json_digest(benchmark), "test_evaluated": False,
             "rationale": {
-                "material": "All 24 shortlisted sources processed. Exact complete stories or contiguous "
+                "material": f"All {len(WINTER_SOURCES)} shortlisted sources processed. Exact complete stories or contiguous "
                 "winter/domestic chapter ranges; no rewriting, keyword-filtered fragments or external weights.",
-                "replay": "50% additional / 50% original examples; nearly equal target share with full causal "
-                "supervision. Every original window once per mixture epoch. New windows cycle without replacement "
+                "replay": "50% additional / 50% original examples; both pools have the same target-span width "
+                "and look-back. Every original window once per mixture epoch. New windows cycle without replacement "
                 "with fresh offsets per cycle. Exact target counts and new-corpus pass equivalents are reported.",
                 "endings": "No windows cross selected ranges. EOS only at genuine story/book ends; chapter cuts "
                 "are not declared complete stories. Original spellings, dialogue and verse are retained.",
+                "context": "Prepend up to --winter-lookback prior tokens within the same document; mask only "
+                "this added context and the first conditioning token. At the default 128, full rows score 383 "
+                "targets in 512 positions. Use 0 for a no-look-back ablation. Shifts still sample interior targets; "
+                "padding/context labels never enter target accounting. Validation/review loss windows unchanged.",
                 "optimization": "Inherited GPT-2 architecture/dropout/tokenizer. Fresh AdamW, default peak 5e-5, "
                 "betas .9/.95, decay .1, clip 1; 3% warmup, cosine to 5e-6. Default batch 8x4, 1000 updates. "
                 "Conservative pilot settings, not tuned optima; new material remains small.",
-                "evaluation": "Original validation and benchmark fixed; test read only for overlap screening. "
+                "evaluation": "Original validation and generation prompts fixed; test read only for overlap screening. "
                 "Baseline eligible for best NLL; all review weights retained. All new selections are training "
-                "material, not a new validation split. No automatic coherence verdict.",
+                "material, not a new validation split. Reference NLL with real versus unrelated, equal-length "
+                "context measures context sensitivity, not coherence. No automatic coherence verdict.",
                 "control": "Optional same-initialization, same-update ordinary continuation. Target counts and "
                 "compute are not exactly matched; compare prose as well as losses."}}
     if args.resume:
@@ -2909,8 +3514,10 @@ def finetune_winter(args):
         atomic_json(snapshot/"provenance.json", {"dataset_sha256": signature, "source": source_description})
         atomic_json(out/"benchmark.json", benchmark)
         atomic_json(out/"experiment.json", plan)
-    replay = BookWindows(data/"train.jsonl", 512, args.train_limit, random_offsets=True, seed=args.seed)
-    new = BookWindows(material/"train.jsonl", 512, args.train_limit, random_offsets=True, seed=args.seed)
+    replay = ContextBookWindows(data/"train.jsonl", 512, args.train_limit, random_offsets=True,
+                                seed=args.seed, lookback=args.winter_lookback)
+    new = ContextBookWindows(material/"train.jsonl", 512, args.train_limit, random_offsets=True,
+                             seed=args.seed, lookback=args.winter_lookback)
     exposure = training_exposure(WinterReplayDataset(replay, new, args.seed),
                                 args.batch_size*args.accumulation, args.max_steps, args.seed)
     atomic_json(out/"planned_exposure.json", exposure)
@@ -2949,6 +3556,13 @@ def finetune_winter(args):
             "optimizer_skipped_steps", "applied_optimizer_updates")}
         results[name].update(best_model=str(out/name/"best"), **{k: summary["continuation"][k] for k in (
             "retained_initial_model", "initial_validation_nll")})
+        results[name]["context_use"] = {}
+        for label, folder in (("initial", out/name/"initial"), ("selected", out/name/"best")):
+            context_use = json.loads((folder/"coherence.json").read_text()).get("context_use")
+            if context_use:
+                results[name]["context_use"][label] = {k: context_use[k] for k in (
+                    "paired_prompts", "scored_tokens_per_condition", "true_prefix_nll",
+                    "unrelated_prefix_nll", "context_gain_nll")}
         atomic_json(out/"comparison.json", {"complete": len(results) == len(branches), "branches": results,
                     "benchmark_sha256": json_digest(benchmark), "test_evaluated": False,
                     "matched_compute": False, "matched_target_counts": False, "coherence_winner": None,
@@ -3010,7 +3624,7 @@ repetition, dated language, and historical biases. Repeated epochs are not new d
 Best validation NLL: {summary['best_validation_nll']}
 Continuation details: {json.dumps(summary.get('continuation'))}
 Training windows: {'shifted within books each epoch' if summary['run'].get('random_window_offsets') else 'fixed'}
-Run intervention: {'Winter-fiction additions with 50% original replay examples and full causal supervision.' if (summary['run'].get('winter_recipe') or {}).get('treatment') else ('Original-text scene continuations with masked prefixes and corpus replay.' if (summary['run'].get('scene_recipe') or {}).get('treatment') else 'Ordinary causal language modeling.')}
+Run intervention: {'Winter-fiction additions with 50% original replay examples; the saved winter_recipe specifies the context look-back and target supervision.' if (summary['run'].get('winter_recipe') or {}).get('treatment') else ('Original-text scene continuations with masked prefixes and corpus replay.' if (summary['run'].get('scene_recipe') or {}).get('treatment') else 'Ordinary causal language modeling.')}
 Test token perplexity: {summary['test'].get('test_perplexity', 'not evaluated in this development run')}
 Smoke test: {summary['smoke_test']}; limited data: {summary['limited_data']}.
 Scores use this model's tokenizer and are not directly comparable to other vocabularies.
@@ -3288,6 +3902,8 @@ def main(argv=None):
     parser.add_argument("--scenes-per-book", type=int, default=16)
     parser.add_argument("--scene-review", help="Optional edited scene_candidates.csv; only include/natural_end may change")
     parser.add_argument("--winter-cache", help="Winter source download cache; defaults to winter-data beside --data-dir")
+    parser.add_argument("--winter-lookback", type=int,
+                        help="finetune-winter: preceding context tokens without duplicate loss (default 128; 0 for ablation)")
     parser.add_argument("--with-control", action="store_true",
                         help="finetune-winter: also run a same-start, same-update original-corpus control")
     parser.add_argument("--eval-limit", type=int, help="Diagnostic window cap; omitted for full evaluation")
@@ -3307,7 +3923,7 @@ def main(argv=None):
                 "random_window_offsets": (True, False),
                 "output_dir": (str(ROOT / "runs" / "christmas-capacity"), str(ROOT / "runs" / "christmas"))}
     if scenes or winter:
-        for name, value in {"output_dir": str(ROOT/("runs/christmas-winter" if winter else "runs/christmas-scenes")), "learning_rate": 5e-5,
+        for name, value in {"output_dir": str(ROOT/("runs/christmas-winter-v2" if winter else "runs/christmas-scenes")), "learning_rate": 5e-5,
                             "warmup_ratio": .03, "max_steps": 1000, "benchmark_steps": 250,
                             "min_success_rate": 1., "random_window_offsets": True}.items():
             if getattr(args, name) is None:
@@ -3326,6 +3942,12 @@ def main(argv=None):
         parser.error("--plan-only is for compare-capacity, finetune-scenes or finetune-winter")
     if (args.winter_cache or args.with_control) and not winter:
         parser.error("--winter-cache and --with-control are for finetune-winter")
+    if args.winter_lookback is not None and not winter:
+        parser.error("--winter-lookback is for finetune-winter")
+    if winter:
+        args.winter_lookback = 128 if args.winter_lookback is None else args.winter_lookback
+        if not 0 <= args.winter_lookback <= 256:
+            parser.error("--winter-lookback must be between 0 and 256 for the context-512 continuation")
     if args.scene_review and not scenes:
         parser.error("--scene-review is for finetune-scenes")
     if scenes and (not 128 <= args.scene_min_tokens <= args.scene_max_tokens <= 510 or args.scenes_per_book <= 0):

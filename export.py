@@ -33,8 +33,8 @@ ROOT = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd(
 # to another best/ or retained review model if that is what you want to export.
 # Choose an empty output directory. Add --repo-id only to request a Hub upload.
 EXPORT_NOTEBOOK_ARGS = [
-    "--model-dir", "runs/christmas-winter/expanded/best",
-    "--output-dir", "exports/christmas-winter",
+    "--model-dir", "runs/christmas-winter-v2/expanded/best",
+    "--output-dir", "exports/christmas-winter-v2",
     "--setup", "--outtype", "f16", "--verify", "--download",
 ]
 # Inline equivalent of requirements-export.txt; no repository/helper file needed.

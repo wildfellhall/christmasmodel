@@ -11,7 +11,7 @@ from transformers import GPT2Config, GPT2LMHeadModel, TrainingArguments
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import model as pipeline
-from model import (BookWindows, CausalCollator, WinterReplayDataset, combined_book_windows,
+from model import (BookWindows, ContextBookWindows, CausalCollator, WinterReplayDataset, combined_book_windows,
                    copied_training_spans, screen_winter_units, select_winter_text,
                    training_exposure, training_trainer, window_epoch_callback)
 
@@ -149,7 +149,8 @@ def test_copy_scan_includes_additions_without_crossing_book_boundaries(pools):
     assert combined.original_pool is replay and combined.supplementary_pool is new
 
 
-def test_winter_resume_replays_exact_batches_and_weights(pools, tmp_path):
+@pytest.mark.parametrize('lookback', [0, 4])
+def test_winter_resume_replays_exact_batches_and_weights(pools, tmp_path, lookback):
     torch.manual_seed(42)
     template = GPT2LMHeadModel(GPT2Config(vocab_size=64, n_positions=16, n_embd=16, n_layer=1,
                                         n_head=2, resid_pdrop=.05, embd_pdrop=.05, attn_pdrop=.05))
@@ -158,7 +159,9 @@ def test_winter_resume_replays_exact_batches_and_weights(pools, tmp_path):
     def run(path, resume=None):
         model = GPT2LMHeadModel(template.config)
         model.load_state_dict(initial)
-        dataset = WinterReplayDataset(*pools)
+        contextual = [ContextBookWindows(tmp_path/name, 16, random_offsets=True, lookback=lookback)
+                      for name in ('original.jsonl', 'new.jsonl')]
+        dataset = WinterReplayDataset(*contextual)
         batches = []
         model.register_forward_pre_hook(lambda m, a, k: batches.append(
             (k['input_ids'].tolist(), k['labels'].tolist())), with_kwargs=True)
@@ -175,3 +178,98 @@ def test_winter_resume_replays_exact_batches_and_weights(pools, tmp_path):
     resumed, remaining = run(tmp_path/'resumed', tmp_path/'full/checkpoint-5')
     assert remaining == batches[-len(remaining):]
     assert all(torch.equal(v, resumed.state_dict()[k]) for k, v in full.state_dict().items())
+
+
+@pytest.mark.parametrize('lookback', [0, 4, 8])
+def test_context_windows_score_every_fixed_target_once_without_crossing_books(pools, tmp_path, lookback):
+    dataset = ContextBookWindows(tmp_path/'new.jsonl', 16, lookback=lookback)
+    collected = {i: [] for i in range(len(dataset.books))}
+    for i in range(len(dataset)):
+        row = dataset[i]
+        book, _, _ = dataset.target_window(i)
+        targets = [token for token in row['labels'][1:] if token != -100]
+        collected[book].extend(targets)
+        assert len(row['input_ids']) <= 16
+        assert len(targets) == dataset.scored_targets(i)
+        # The actual collator/causal shift must agree, including the EOS label.
+        batch = CausalCollator(1)([row])
+        assert batch['labels'][:, 1:].ne(-100).sum() == len(targets)
+    assert all(collected[i] == ids[1:].tolist() for i, ids in enumerate(dataset.books))
+    assert collected[0][-1] != 0 and collected[1][-1] == 0
+    if lookback == 4:
+        assert dataset[1]['input_ids'] == list(range(37, 50))
+        assert dataset[1]['labels'] == [-100]*5+list(range(42, 50))
+
+
+def test_context_mixture_exposure_counts_labels_not_visible_context(pools, tmp_path):
+    mixture = WinterReplayDataset(
+        ContextBookWindows(tmp_path/'original.jsonl', 16, random_offsets=True, lookback=4),
+        ContextBookWindows(tmp_path/'new.jsonl', 16, random_offsets=True, lookback=4))
+    expected, visible = 0, 0
+    mixture.set_training_epoch(0)
+    order = torch.randperm(len(mixture), generator=torch.Generator().manual_seed(42)).tolist()
+    for i in order[:8]:
+        row = mixture[i]
+        expected += int(CausalCollator(1)([row])['labels'][:, 1:].ne(-100).sum())
+        visible += len(row['input_ids'])-1
+    exposure = training_exposure(mixture, 4, 2, 42)
+    assert exposure['scored_targets'] == expected < visible
+    assert exposure['new_targets']+exposure['replay_targets'] == expected
+    control = mixture.replay
+    actual = training_exposure(control, len(control), 1, 42)
+    assert actual['scored_targets'] == sum(control.scored_targets(i) for i in range(len(control)))
+
+
+def test_unrelated_context_diagnostic_changes_only_prefix_and_restores_mode():
+    from types import SimpleNamespace
+
+    class PrefixModel(torch.nn.Module):
+        device = torch.device('cpu')
+
+        def __init__(self):
+            super().__init__()
+            self.inputs = []
+
+        def forward(self, inputs, **kwargs):
+            self.inputs.append(inputs.clone())
+            # A controlled model: evidence is exclusively the first context token.
+            logits = torch.nn.functional.one_hot(inputs[:, 0], 8).float()*6
+            return SimpleNamespace(logits=logits[:, None, :].expand(-1, inputs.shape[1], -1))
+
+    benchmark = {'context_probe_tokens': 3, 'prompts': [
+        {'prompt_id': 'a', 'book_id': 'one', 'input_ids': [2, 3, 4], 'reference_ids': [2, 2, 2]},
+        {'prompt_id': 'b', 'book_id': 'two', 'input_ids': [5, 6], 'reference_ids': [5, 5, 5]},
+    ]}
+    model = PrefixModel()
+    rng = torch.get_rng_state().clone()
+    report = pipeline.score_context_use(model, benchmark)
+    assert model.training and torch.equal(torch.get_rng_state(), rng)
+    assert report['scored_tokens_per_condition'] == 6 and report['paired_prompts'] == 2
+    assert report['context_gain_nll'] == pytest.approx(6, abs=1e-5)
+    assert model.inputs[0].tolist() == [[2, 3, 4, 2, 2, 2], [5, 6, 5, 2, 2, 2]]
+    assert model.inputs[1].tolist() == [[5, 6, 5, 5, 5], [2, 3, 5, 5, 5]]
+    assert all(p['book_id'] != p['unrelated_book_id'] for p in report['pairs'])
+    benchmark['prompts'] = benchmark['prompts'][:1]
+    missing = pipeline.score_context_use(model, benchmark)
+    assert missing['context_gain_nll'] is None and missing['skipped_prompt_ids'] == ['a']
+
+
+def test_inline_additions_keep_individual_dates_and_true_endings():
+    sources = {r['id']: r for r in pipeline.WINTER_SOURCES}
+    new_ids = {'24873', '24874', '24876', '24878', '19766', '17888', '17530',
+               '34378', '76681', '56583', '316', '544', '45'}
+    assert len(sources) == len(pipeline.WINTER_SOURCES) == 37
+    assert sum(len(sources[i]['selections']) for i in new_ids) == 28
+    assert all(s['year'] < 1920 for i in new_ids for s in sources[i]['selections'])
+    assert {s['year'] for s in sources['24878']['selections']} == {1909, 1910}
+    assert sources['17530']['selections'][0]['natural_end']
+    assert sources['56583']['selections'][0]['natural_end']
+    assert not any(s['natural_end'] for s in sources['45']['selections'])
+    assert '24877' not in sources  # The reprinted Anne chapter must not return.
+
+
+def test_default_source_prefers_previous_winter_run(tmp_path):
+    assert pipeline.default_winter_source(tmp_path) == tmp_path/'runs/christmas-scenes/control/best'
+    latest = tmp_path/'runs/christmas-winter/expanded/best'
+    latest.mkdir(parents=True)
+    assert pipeline.default_winter_source(tmp_path) == latest

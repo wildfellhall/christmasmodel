@@ -31,7 +31,7 @@ def test_pasted_export_ignores_colab_kernel_flags(monkeypatch, tmp_path):
     assert namespace["ROOT"] == tmp_path
     assert installs[0][0][1:5] == ["-m", "pip", "install", "-q"]
     assert installs[0][1]["check"] is True
-    assert exports[0]["model_dir"] == "runs/christmas-winter/expanded/best"
+    assert exports[0]["model_dir"] == "runs/christmas-winter-v2/expanded/best"
     assert exports[0]["setup"] and exports[0]["verify"] and exports[0]["download"]
     assert exports[0]["repo_id"] is None
 
