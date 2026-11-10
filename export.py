@@ -34,8 +34,8 @@ ROOT = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd(
 # to another best/ or retained review model if that is what you want to export.
 # Choose an empty output directory. Add --repo-id only to request a Hub upload.
 EXPORT_NOTEBOOK_ARGS = [
-    "--model-dir", "runs/christmas-continuity/expanded/last",
-    "--output-dir", "exports/christmas-continuity",
+    "--model-dir", "runs/story-scratch",
+    "--output-dir", "exports/story-scratch",
     "--setup", "--outtype", "f16", "--verify", "--download",
 ]
 # Inline equivalent of requirements-export.txt; no repository/helper file needed.
@@ -104,7 +104,15 @@ def validate_tokenizer(tokenizer):
 
 def convert_gguf(hf_dir, outfile, llama_dir, outtype):
     import torch
-    from transformers import AutoTokenizer
+    from transformers import AutoConfig, AutoTokenizer
+    if AutoConfig.from_pretrained(hf_dir, local_files_only=True).model_type != 'gpt2':
+        # The pinned converter owns native architecture/tokenizer mappings.
+        run([sys.executable, Path(llama_dir)/'convert_hf_to_gguf.py', hf_dir,
+             '--outfile', outfile, '--outtype', outtype])
+        with Path(outfile).open('rb') as handle:
+            if handle.read(4) != b'GGUF':
+                raise RuntimeError('Converter did not produce GGUF')
+        return
     sys.path.insert(0, str(llama_dir))
     sys.path.insert(0, str(llama_dir / "gguf-py"))
     import gguf
@@ -133,7 +141,7 @@ def verify_gguf(hf_dir, gguf_path, llama_dir):
     """Compile a CPU server; compare token IDs and greedy first tokens to HF."""
     import requests
     import torch
-    from transformers import AutoTokenizer, GPT2LMHeadModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
     binary = llama_dir / "build" / "bin" / "llama-server"
     if not binary.exists():
         run(["cmake", "-S", llama_dir, "-B", llama_dir / "build", "-DCMAKE_BUILD_TYPE=Release",
@@ -142,7 +150,9 @@ def verify_gguf(hf_dir, gguf_path, llama_dir):
              "-DLLAMA_BUILD_UI=OFF", "-DLLAMA_USE_PREBUILT_UI=OFF"])
         run(["cmake", "--build", llama_dir / "build", "--target", "llama-server", "-j", "2"])
     tokenizer = AutoTokenizer.from_pretrained(hf_dir, local_files_only=True)
-    model = GPT2LMHeadModel.from_pretrained(hf_dir, local_files_only=True).eval()
+    model = AutoModelForCausalLM.from_pretrained(hf_dir, local_files_only=True).eval()
+    context = getattr(model.config, 'story_training_context', None) or getattr(
+        model.config, 'max_position_embeddings', getattr(model.config, 'n_positions', 512))
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
@@ -150,7 +160,7 @@ def verify_gguf(hf_dir, gguf_path, llama_dir):
     log_path = gguf_path.with_suffix(".verify.log")
     with log_path.open("w") as log:
         process = subprocess.Popen([str(binary), "-m", str(gguf_path), "--host", "127.0.0.1",
-                                    "--port", str(port), "-c", str(model.config.n_positions),
+                                    "--port", str(port), "-c", str(context),
                                     "-ngl", "0", "--parallel", "1"], stdout=log, stderr=log)
         try:
             deadline = time.monotonic() + 90
@@ -190,7 +200,33 @@ def verify_gguf(hf_dir, gguf_path, llama_dir):
                                 "match": actual == [expected]})
             if not all(row["match"] for row in matches):
                 raise RuntimeError(f"First-token mismatch (rounding/quantization can change near ties): {matches}")
-            return {"tokenizer_probes_passed": len(TOKENIZER_PROBES), "first_token_checks": matches}
+            continuations = []
+            for probe in TOKENIZER_PROBES[:3]:
+                inputs = tokenizer(probe, return_tensors='pt')
+                budget = min(32, context-inputs['input_ids'].shape[1])
+                if budget <= 0:
+                    raise ValueError('Verification prompt exceeds context')
+                with torch.inference_mode():
+                    expected = model.generate(**inputs, max_new_tokens=budget, do_sample=False,
+                        repetition_penalty=1., pad_token_id=tokenizer.pad_token_id,
+                        eos_token_id=tokenizer.eos_token_id)[0, inputs['input_ids'].shape[1]:].tolist()
+                response = requests.post(base+'/completion', json={
+                    'prompt': inputs['input_ids'][0].tolist(), 'n_predict': budget, 'temperature': 0,
+                    'repeat_penalty': 1., 'cache_prompt': False, 'return_tokens': True}, timeout=60)
+                response.raise_for_status()
+                actual = response.json().get('tokens')
+                if actual is None:
+                    raise RuntimeError('Runtime omitted continuation tokens')
+                def content(ids):
+                    return ids[:ids.index(tokenizer.eos_token_id)] if tokenizer.eos_token_id in ids else ids
+                expected, actual = content(expected), content(actual)
+                continuations.append({'prompt': probe, 'hf_tokens': expected, 'gguf_tokens': actual,
+                    'exact_match': expected == actual, 'hf_text': tokenizer.decode(expected),
+                    'gguf_text': tokenizer.decode(actual)})
+            return {'tokenizer_probes_passed': len(TOKENIZER_PROBES), 'first_token_checks': matches,
+                    'continuation_checks': continuations,
+                    'continuations_match': all(row['exact_match'] for row in continuations),
+                    'note': 'Quantization/rounding may change greedy trajectories; inspect both full continuations.'}
         finally:
             process.terminate()
             try:
@@ -235,8 +271,12 @@ def download(gguf_path):
 
 
 def export_model(args):
-    from transformers import AutoTokenizer, GPT2LMHeadModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
     source, out = Path(args.model_dir).resolve(), Path(args.output_dir).resolve()
+    selection = None
+    if not (source/'config.json').is_file() and not args.upload_only:
+        from story_review import resolve_selected
+        source, selection = resolve_selected(source)
     api = hub_api() if args.repo_id else None
     if args.upload_only:
         if api is None:
@@ -257,10 +297,13 @@ def export_model(args):
         raise ValueError("Export directory is not empty; choose a new --output-dir")
     llama_dir = ensure_converter(args.llama_dir, args.setup)
     tokenizer = AutoTokenizer.from_pretrained(source, local_files_only=True)
-    model = GPT2LMHeadModel.from_pretrained(source, local_files_only=True)
-    validate_tokenizer(tokenizer)
+    model = AutoModelForCausalLM.from_pretrained(source, local_files_only=True)
+    if model.config.model_type == 'gpt2':
+        validate_tokenizer(tokenizer)
+    elif model.config.model_type != 'llama':
+        raise ValueError('This workflow currently verifies GPT-2 and Llama-family exports')
     cfg = model.config
-    if (cfg.n_inner not in (None, 4*cfg.n_embd) or cfg.activation_function != "gelu_new"
+    if cfg.model_type == 'gpt2' and (cfg.n_inner not in (None, 4*cfg.n_embd) or cfg.activation_function != "gelu_new"
             or cfg.scale_attn_by_inverse_layer_idx or not cfg.scale_attn_weights
             or cfg.add_cross_attention or cfg.n_embd % cfg.n_head
             or cfg.vocab_size != len(tokenizer)):
@@ -268,13 +311,14 @@ def export_model(args):
     if (cfg.bos_token_id, cfg.eos_token_id, cfg.pad_token_id) != (
             tokenizer.bos_token_id, tokenizer.eos_token_id, tokenizer.pad_token_id):
         raise ValueError("Model and tokenizer special token IDs disagree")
-    cfg.n_ctx = cfg.n_positions  # Required by the pinned GPT-2 converter.
+    if cfg.model_type == 'gpt2':
+        cfg.n_ctx = cfg.n_positions  # Required by the pinned GPT-2 converter.
     cfg.use_cache = True
     hf_dir = out / "huggingface"
     hf_dir.mkdir(parents=True)
     model.save_pretrained(hf_dir, safe_serialization=True)
     tokenizer.save_pretrained(hf_dir)
-    for name in ("README.md", "training_summary.json", "samples.json", "supplementary_sources.json"):
+    for name in ("README.md", "training_summary.json", "samples.json", "supplementary_sources.json", 'story_provenance.json'):
         if (source / name).exists():
             shutil.copy2(source / name, hf_dir / name)
     del model
@@ -283,7 +327,11 @@ def export_model(args):
     verification = verify_gguf(hf_dir, gguf_path, llama_dir) if args.verify else {"runtime_verified": False}
     manifest = {"llama_cpp_commit": LLAMA_COMMIT, "outtype": args.outtype,
                 "gguf_sha256": hashlib.sha256(gguf_path.read_bytes()).hexdigest(),
-                "bytes": gguf_path.stat().st_size, "verification": verification}
+                "bytes": gguf_path.stat().st_size, "verification": verification,
+                'source': str(source), 'generation_selection': selection,
+                'decoding': getattr(cfg, 'story_decoding', None),
+                'context': getattr(cfg, 'story_training_context', None) or getattr(
+                    cfg, 'max_position_embeddings', getattr(cfg, 'n_positions', None))}
     (out / "export_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     archive = shutil.make_archive(str(out / "christmasmodel-huggingface"), "zip", hf_dir)
     if args.repo_id:
@@ -296,12 +344,13 @@ def export_model(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--model-dir", default=str(ROOT / "runs" / "christmas" / "best"))
+    parser.add_argument("--model-dir", default=str(ROOT / "runs" / "story-scratch"),
+                        help='Reviewed story run, selected.json, or an explicitly named diagnostic checkpoint')
     parser.add_argument("--output-dir", default=str(ROOT / "exports" / "christmas"))
     parser.add_argument("--llama-dir", default=str(ROOT / "llama.cpp"))
     parser.add_argument("--setup", action="store_true", help="Fetch the pinned llama.cpp source if missing")
     parser.add_argument("--outtype", choices=["f16", "f32", "q8_0"], default="f16")
-    parser.add_argument("--verify", action="store_true", help="Build CPU llama-server and verify tokenizer/first tokens")
+    parser.add_argument("--verify", action="store_true", help="Build CPU llama-server and compare tokenization, next tokens, and greedy continuations")
     parser.add_argument("--repo-id", help="Optional Hugging Face upload destination: owner/model-name")
     parser.add_argument("--upload-only", action="store_true", help="Upload/retry an existing export without converting again")
     parser.add_argument("--public", action="store_true", help="Create a public Hub repo (default: private)")

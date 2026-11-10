@@ -1,0 +1,26 @@
+[
+  {
+    "id": "113",
+    "title": "The Secret Garden",
+    "year": 1911,
+    "date_evidence": "First edition, New York: Frederick A. Stokes Company, 1911; https://www.loc.gov/item/11021580/",
+    "opening": "When Mary Lennox was sent to Misselthwaite Manor",
+    "reason": "Sustained scenes, recurring characters, dialogue, and visible consequences."
+  },
+  {
+    "id": "709",
+    "title": "The Princess and Curdie",
+    "year": 1883,
+    "date_evidence": "Chatto & Windus edition, 1883, university library catalog; https://ci.nii.ac.jp/ncid/BA40890712",
+    "opening": "Curdie was the son of Peter the miner.",
+    "reason": "Continuous character goals and a causal adventure plot."
+  },
+  {
+    "id": "55",
+    "title": "The Wonderful Wizard of Oz",
+    "year": 1900,
+    "date_evidence": "Author's introduction dated Chicago, April 1900; https://www.gutenberg.org/cache/epub/55/pg55.txt",
+    "opening": "Dorothy lived in the midst of the great Kansas prairies,",
+    "reason": "Clear action, dialogue, goals, and recurring characters across scenes."
+  }
+]

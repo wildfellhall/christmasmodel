@@ -1,29 +1,15 @@
-"""Standalone Colab-ready GPT-2 trained from random weights on Gutenberg books.
+"""Christmas/winter language-model tools with a Google Colab entry point.
 
-Single-cell Colab usage: select a fresh GPU runtime, paste this entire file into
-one code cell, and run it. Dependencies are installed and training starts using
-the source list embedded below. No repository clone or corpus.py is required.
-Edit NOTEBOOK_ARGS below to change options or resume a notebook run.
+Open Christmasmodel_Colab.ipynb for the current workflow. It fetches the source
+from GitHub, pins a code revision in Drive, and offers small scratch, matched
+scratch, and pretrained branches. Adaptation text includes works through 1920.
+The pretrained branch carries outside knowledge; the small scratch branch learns
+both tokenizer and model weights solely from the prepared historical corpus.
 
-The default pasted cell runs train-continuity from existing project weights:
-original next sentences versus same-passage entity, polarity and order changes,
-with original-text replay, positive continuation loss and repetition unlikelihood.
-All approved winter selections and the original Christmas stories remain the
-positive training data. No external model or generated positive prose is used.
-Keep the original prepared data and checkpoint available; nothing is rebuilt.
-Use --plan-only to inspect the budget, --smoke-test for a tiny execution check,
-and --resume to recover without restarting completed branches.
-
-Colab GPU runtime, separate cells:
-    !git clone https://github.com/wildfellhall/christmasmodel.git
-    %cd /content/christmasmodel
-    %pip install -q -r requirements.txt
-    !python model.py train
-    !python model.py generate --prompt "On Christmas Eve, the snow"
-
-The base models use random weights. No external pretrained weights or tokenizer
-are loaded. Winter/coherence commands add the inline WINTER_SOURCES selections;
-the older commands retain their original Christmas-only data restrictions.
+The stories subcommand delegates to the story_* modules in this repository.
+Its notebook default displays a plan, without starting training. Legacy commands
+below retain their original sources and checkpoint formats for existing runs.
+Installation, tests, downloads, training, and export belong in Colab.
 """
 from __future__ import annotations
 
@@ -40,11 +26,9 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
-# Prefer runs/christmas-coherence/expanded/last, then that run's best; fall back to
-# winter-v2/expanded/best, winter/expanded/best, or scenes/control/best. Override --continue-from if
-# your files are on Drive. Add --resume after a disconnect (omit --continue-from).
-# For Colab persistence, set --data-dir and --output-dir to mounted Drive paths.
-NOTEBOOK_ARGS = ["train-continuity", "--output-dir", "runs/christmas-continuity"]
+# Current workflow: use Christmasmodel_Colab.ipynb with the repository modules.
+# This default only displays a plan; it does not launch the legacy objectives.
+NOTEBOOK_ARGS = ["stories", "plan", "--config", "configs/story-scratch.json"]
 NOTEBOOK_REQUIREMENTS = [
     "torch>=2.6,<3", "transformers==4.57.6", "tokenizers==0.22.2", "accelerate==1.12.0",
     "huggingface-hub==0.36.2", "numpy>=1.26,<3", "requests>=2.32,<3", "safetensors>=0.4",
@@ -1521,16 +1505,20 @@ def continuity_corruptions(prefix, target, person_names=None):
     """Corpus-derived negatives, not human labels or a semantic truth oracle."""
     alternatives = []
     # Names must occur inside sentences in the prefix, avoiding ordinary sentence starters.
-    names = sorted(set(re.findall(r'(?<=[a-z,;] )([A-Z][a-z]{2,})\b', prefix)) -
+    full_names = list(re.finditer(r'\b[A-Z][a-z]{2,}(?:[ \t]+[A-Z][a-z]{2,}){0,2}\b', prefix))
+    names = sorted({m.group() for m in full_names if re.search(r'[a-z,;] $',prefix[:m.start()])} -
                    {'Christmas', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday',
                     'Saturday', 'December', 'January', 'February', 'God', 'Lord'})
     if person_names is not None:
         names = [name for name in names if name in person_names]
     for name in names:
-        if re.search(r'\b'+re.escape(name)+r'\b', target):
+        mentions = [m for m in re.finditer(r'\b[A-Z][a-z]{2,}(?:[ \t]+[A-Z][a-z]{2,}){0,2}\b',target)
+                    if m.group()==name]
+        if mentions:
             other = next((n for n in names if n != name), None)
             if other:
-                alternatives.append(('entity', re.sub(r'\b'+re.escape(name)+r'\b', other, target, count=1)))
+                mention=mentions[0]
+                alternatives.append(('entity', target[:mention.start()]+other+target[mention.end():]))
                 break
     # Require an auxiliary construction: do not turn lexical "had a gift" into malformed prose.
     match = re.search(r'\b(was|were|is|are|could|would|should|will|can)( not)?\b', target, re.I)
@@ -1543,7 +1531,7 @@ def continuity_corruptions(prefix, target, person_names=None):
         first, second = boundaries[:2]
         # Keep punctuation/words; alter only order. Exclude ambiguous identical sentences.
         a, b = target[:first].strip(), target[first:second].strip()
-        if a != b and min(len(a.split()), len(b.split())) >= 5 and not any(quote in target for quote in ('"', '\u201c', '\u201d')):
+        if a != b and min(len(a.split()), len(b.split())) >= 5 and not any(quote in prefix+target for quote in ('"', '\u201c', '\u201d')):
             leading = target[:len(target)-len(target.lstrip())]
             alternatives.append(('order', leading+b+' '+a+target[second:]))
     return [(kind, text) for kind, text in alternatives if text != target]
@@ -1565,8 +1553,9 @@ def build_continuity_pairs(dataset, tokenizer, per_book=128, seed=42):
             ids = ids[:-1]
         text = tokenizer.decode(ids, clean_up_tokenization_spaces=False)
         verbs = r'(?:said|asked|answered|replied|whispered|exclaimed|cried)'
-        person_names = set(re.findall(r'\b([A-Z][a-z]{2,})\s+'+verbs+r'\b', text))
-        person_names.update(re.findall(r'\b'+verbs+r'\s+([A-Z][a-z]{2,})\b', text))
+        name_pattern=r'([A-Z][a-z]{2,}(?:[ \t]+[A-Z][a-z]{2,}){0,2})'
+        person_names = set(re.findall(r'\b'+name_pattern+r'\s+'+verbs+r'\b', text))
+        person_names.update(re.findall(r'\b'+verbs+r'\s+'+name_pattern+r'\b', text))
         encoded = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True, verbose=False)
         if encoded['input_ids'] != ids:
             raise ValueError(f'Continuity source does not round-trip: {book_id}')
@@ -4035,7 +4024,7 @@ def finetune_winter(args):
     latest = ROOT/'runs/christmas-winter-v2/expanded/best'
     default_source = latest if coherence and latest.is_dir() else default_winter_source(ROOT)
     if continuity:
-        for candidate in (ROOT/'runs/christmas-coherence/expanded/last', ROOT/'runs/christmas-coherence/expanded/best'):
+        for candidate in (ROOT/'runs/christmas-coherence/expanded/best', ROOT/'runs/christmas-coherence/expanded/last'):
             if candidate.is_dir():
                 default_source = candidate
                 break
@@ -4094,6 +4083,8 @@ def finetune_winter(args):
         manifest, encoded = prepare_winter_material(
             data, Path(args.winter_cache or data.parent/"winter-data"), tokenizer, signature, args.offline)
     args.block_size = model.config.n_positions
+    if coherence and not getattr(args,'winter_lookback_explicit',True):
+        args.winter_lookback=min(args.block_size//4,256)
     pair_records = None
     validation_pairs = None
     if continuity:
@@ -4585,6 +4576,17 @@ def inference(args):
 
 
 def main(argv=None):
+    # The new workflow uses repository modules and versioned catalogs. Legacy
+    # commands remain available for the user's existing data and checkpoints.
+    import sys
+    actual = list(sys.argv[1:] if argv is None else argv)
+    if actual and actual[0] == 'stories':
+        try:
+            from story_training import main as story_main
+        except ImportError as exc:
+            raise RuntimeError('The stories workflow needs the repository checkout. In Colab, clone '
+                               'christmasmodel and %cd into it before running model.py.') from exc
+        return story_main(actual[1:])
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", choices=["prepare", "train", "train-continuity", "train-coherence", "finetune-winter", "finetune-scenes", "compare-capacity", "compare-dropout", "compare-windowing", "compare-depth", "diagnose",
                                             "compare-decoding", "evaluate", "generate"])
@@ -4624,7 +4626,8 @@ def main(argv=None):
                         help="With --continue-from, expand to this depth by inserting initially identity GPT-2 blocks")
     parser.add_argument("--continuation-dropout", type=float,
                         help="Explicit new-stage override for embedding, residual, and attention dropout; otherwise inherit")
-    parser.add_argument("--skip-test", action="store_true", help="Use validation only during model development")
+    parser.add_argument("--skip-test", action="store_true", default=True,
+                        help="Compatibility flag: training uses validation only; run evaluate explicitly for test")
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--smoke-test", action="store_true", help="Tiny CPU model, 3 updates, limited data; not quality training")
     parser.add_argument("--train-limit", type=int, help="Diagnostic window cap; omitted for full training")
@@ -4672,6 +4675,7 @@ def main(argv=None):
                         choices=["both", "greedy", "sample", "blocked_sample", "contrastive", "reranked"],
                         help="Decoding method for generate; both preserves the original greedy/sample output")
     args = parser.parse_args(argv)
+    args.winter_lookback_explicit = args.winter_lookback is not None
     continuity = args.command == 'train-continuity'
     coherence = args.command in {'train-coherence', 'train-continuity'}
     capacity = args.command == "compare-capacity"
