@@ -3,6 +3,8 @@ __pycache__/
 .pytest_cache/
 data/
 winter-data/
+story-data/
+story-data-*/
 runs/
 exports/
 llama.cpp/

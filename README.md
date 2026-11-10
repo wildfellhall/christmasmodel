@@ -1,10 +1,77 @@
 # Christmasmodel
 
-Train literary continuation models from random weights on Gutenberg fiction. The pasted-cell default in [model.py](model.py) now trains **local continuation preferences directly**, using the original Christmas stories and all approved pre-1920 winter selections. [export.py](export.py) packages Hugging Face weights and converts to GGUF.
+The current workflow is [Christmasmodel_Colab.ipynb](Christmasmodel_Colab.ipynb). **Run installation, tests, downloads, training, and export in a Google Colab GPU runtime.** The notebook was authored without executing its cells. The final code changes have not yet been verified in Colab.
 
-The original commands retain the original Christmas-only restriction. Winter, coherence and continuity commands use the approved additions without changing old data, splits or token IDs, or loading outside pretrained weights.
+[Open in Google Colab](https://colab.research.google.com/github/wildfellhall/christmasmodel/blob/codex-colab-story-training/Christmasmodel_Colab.ipynb). The notebook fetches the source directly from the `codex-colab-story-training` review branch. It records the exact Git commit in `source_revision.json` in Drive and reuses it after reconnecting. No source-folder upload is required. Code runs under `/content/christmasmodel-<commit>`; downloads, frozen data, and checkpoints go to the versioned Drive workspace you choose. Use a new workspace version to adopt later code changes.
 
-## Direct continuity training (current default)
+Training text may include **1920**. New additions must provide dated evidence at or before 1920. The original approved material is not excluded on the basis of the previously proposed stricter cutoff.
+
+## Branches and initialization
+
+| Configuration | Weights | Tokenizer | Purpose |
+| --- | --- | --- | --- |
+| `configs/story-scratch.json` | Random, 6 layers × 384 wide GPT-2 | 8,192-token byte BPE learned only from training text | Small historical-only baseline |
+| `configs/story-matched-scratch.json` | Random SmolLM2-135M architecture | Native SmolLM2 tokenizer | Matched initialization control |
+| `configs/story-pretrained.json` | Pretrained SmolLM2-135M | Same native tokenizer | Adaptation with existing language knowledge |
+
+The matched pair pins the same architecture and tokenizer revision, `93efa2f097d58c2a74874c7e644dbc9b0cee75a2`, and uses the same source splits, seeds, context, and target-token budget. Only initialization, learning rate, and output path differ. Pretrained weights carry knowledge from outside the historical corpus; fine-tuning does not erase it. The matched scratch control uses an externally learned tokenizer but no pretrained model weights. Use the small scratch branch for a tokenizer and weights learned entirely from the approved-period material. An existing project's checkpoint cannot be treated as unseen on the new holdouts.
+
+The larger scratch branch is an experiment, not a recommendation to solve scarce-data overfitting with more parameters. Start with the small model and inspect actual prose. No full run has established coherent outputs for this new workflow.
+
+## Corpus and objective changes
+
+`build_story_catalog.py` reconstructs exact source ranges from the frozen download snapshot and reviewed boundary overrides. It works in a fresh Colab runtime without a legacy `data/manifest.json`. Known contents pages, introductions, advertisements, illustration captions, and Gutenberg trailers are excluded or cleaned. Nine additional anthologies now have explicit constituent-story ranges, alongside the existing numbered Christmas anthology. Unresolved collections are omitted and recorded in `pending_anthologies`; the catalog does not certify guessed story endings.
+
+The broader historical additions are *The Secret Garden* (1911), *The Princess and Curdie* (1883), and *The Wonderful Wizard of Oz* (1900). Their narrative openings and publication evidence are recorded in `historical_additions.json`. They add sustained character interactions and events instead of selecting examples merely because their sentences are short. This is an initial expansion, not a large-scale pretraining corpus.
+
+Preparation hashes sources and selected ranges, deduplicates reprints, groups overlapping works before splitting, and keeps every source volume together. Frozen train/validation/test files include winter material. Whole-book grouping can prevent exact 90/5/5 ratios, particularly in the small historical pool; inspect the reported counts. Supplemental holdouts are new only for new initializations. A pretrained base may already have seen some books in its own training; that overlap is unknown.
+
+`story_source_snapshot.json` is only a source snapshot and is rejected as direct training input. Colab builds `story_catalog.json` and immutable `story-data/`. Change the workspace version when changing source rules. Source edition/hash changes fail visibly instead of silently changing experiments.
+
+Training defaults to plain causal cross-entropy. Windows retain preceding context, prefer paragraph boundaries, mask contextual tokens, and never cross a story/passage boundary. A final EOS is added only at an accepted natural ending; partial passages do not acquire invented endings. Each target is counted once in an unresampled dataset pass. The default lookback derives from the actual chosen context (128 at 512, 256 at 1024).
+
+Pool shares default to their target-token proportions. Explicit `pool_shares` and `author_balance` support controlled reweighting without the old fixed 50/50 window mixture. Logs record actual scored targets per pool and preference-example exposure. The learning-rate horizon is calculated from the target budget, with an explicit maximum-step cap; the final optimizer update can overshoot the target budget by at most one update. Validation patience can stop earlier. Scratch and pretrained runs use separate learning rates.
+
+## Colab sequence
+
+1. Mount Drive, fetch the pinned source, install dependencies, and run the verification cell.
+2. Prepare the frozen corpus. Inspect counts and omitted anthologies.
+3. Choose a branch and run the two-step diagnostic smoke cell. Its weights cannot be promoted or used for final testing.
+4. Enable `RUN_TRAINING`. Rerunning the same configuration resumes the latest complete optimizer checkpoint. A new configuration or source change requires a new run tag.
+5. Review raw prose from retained checkpoints. Lower NLL alone does not establish narrative quality.
+6. Promote an explicitly reviewed checkpoint, generate, and optionally export/verify in Colab.
+7. Evaluate the final held-out test only after choosing the model.
+
+Checkpoint saving retains periodic review weights, the initial model, two recent optimizer checkpoints, and separate `best_nll.json` and `last.json` pointers. The training plan estimates weight/optimizer storage before optimization; expect several GB for a larger branch. Optional gradient checkpointing trades speed for lower activation memory. Completion markers, state hashes, and file-size checks skip interrupted optimizer saves. Initial-model setup can resume after a disconnect before the first review. Corpus, code, configuration, and parent-checkpoint hashes prevent an accidental mixed run.
+
+## Review, ablations, and generation
+
+Each review contains validation token NLL and bits per byte, scored at 512 and the configured longer context when applicable; source-matched text prompts; greedy generation; two sampled seeds; repetition counts; and copied-training-span diagnostics. References are not supplied to generation. Different tokenizers must be compared using bits per byte on the same text and context, not their token NLLs.
+
+Rate every saved continuation in `ratings.csv`: grammar, continuity, progression, nonrepetition, and ending each receive 0 (failed), 1 (mixed), or 2 (clear success). Do not omit failures or edit raw prose. The default promotion policy requires all first four dimensions to pass for at least 80% of samples overall and within each pool, plus no more than 0.15 nats/token regression from that run's best validation NLL. Ending is recorded separately because a requested continuation need not finish the story. This is a review policy, not an automatic coherence guarantee.
+
+`selected.json` records the chosen checkpoint, weight/tokenizer hash, review hash, reviewer, and rating-file hash. Default story generation and run-directory export resolve this reviewed selection. To inspect another checkpoint before promotion, use `stories generate --checkpoint /path/to/model --prompt "..."`; its output is explicitly marked diagnostic. An explicit checkpoint path is also available for diagnostic export. Repetition penalty defaults to 1.0, with temperature, top-p, top-k, seed, and penalty configurable. Generation respects the trained context limit. Exports record the selection and decoding settings; verification compares multiple greedy continuations as well as tokenizer and next-token probes. Reduced-precision differences must be inspected.
+
+The following commands are intended for **Colab cells**, after setup:
+
+```python
+# Generate configs only; no runs launch here.
+from story_experiments import ablation_configs, compare_reviews, unblind_ratings
+ablation_configs(CONFIG, WORKSPACE / "ablation-configs-v1")
+
+# Supply actual completed review paths from two or more branches.
+compare_reviews(review_paths, WORKSPACE / "blind-comparison-v1")
+```
+
+Generated ablations vary one factor from CE: repetition unlikelihood, context, winter token share, author balance, or learning rate. Add `preferences=path_to_reviewed_jsonl` to include the reviewed-preference ablation. All retain the baseline corpus, seeds, and token budget; early stopping and step caps can still produce different actual exposure. Compare the recorded counts. Continuation runs may use `start_from` only when the source checkpoint has matching story-corpus and initialization provenance. Run a CE continuation from the same parent alongside any auxiliary continuation.
+
+Blind panels hide branch names and shuffle raw outputs. After scoring, `unblind_ratings` creates per-branch CSVs usable for promotion. The automatic source-versus-arbitrary-model-continuation objective, unrelated-context objective, and readability curriculum are not part of this workflow.
+
+Reviewed preference records require `id`, `unit_id`, the source `text_sha256` as `source_sha256`, character offsets `prefix_start`, `target_start`, `target_end`, a distinct `rejected` continuation, `kind`, `decision: "contradiction"`, `reviewer`, `reason`, and an exact `evidence` quotation occurring in the visible prefix. Positives are recovered from the actual training text. Entity pairs also require two `entities` with full `name` and distinct `canonical_id` fields, plus `agreement_checked: true`. Alias substitutions and grammatically revealing examples must be rejected by the reviewer. Token boundaries must preserve the original positive encoding. The validator checks structure/provenance; it cannot establish semantic truth. No fabricated or unreviewed pairs are supplied as training labels.
+
+Legacy commands remain available below. Their historical recipes and results are not the defaults or evidence that the new Colab workflow has been validated.
+
+## Direct continuity training (legacy experiment)
 
 Paste **all of `model.py` into one Colab GPU cell**, with the existing prepared data and project weights available. The inline source lists and dependencies remain self-contained. Its default is:
 

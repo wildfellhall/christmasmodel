@@ -1,0 +1,19 @@
+{
+  "initialization": "pretrained",
+  "base_model": "HuggingFaceTB/SmolLM2-135M",
+  "revision": "93efa2f097d58c2a74874c7e644dbc9b0cee75a2",
+  "corpus": "story-data",
+  "output": "runs/story-pretrained",
+  "context": 512,
+  "learning_rate": 0.00002,
+  "batch_size": 2,
+  "accumulation": 8,
+  "max_steps": 12000,
+  "token_budget": 32000000,
+  "eval_steps": 500,
+  "objective": "ce",
+  "written_prompts": [
+    "Mary set the last candle in the window. Outside, the snow had covered the path to her grandfather's cottage. When a knock sounded at the door, she",
+    "The children had saved their pennies for a Christmas present, but on the way to the shop they found a little boy sitting alone in the snow."
+  ]
+}

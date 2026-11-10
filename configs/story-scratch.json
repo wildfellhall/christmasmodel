@@ -1,0 +1,24 @@
+{
+  "initialization": "scratch",
+  "corpus": "story-data",
+  "output": "runs/story-scratch",
+  "layers": 6,
+  "width": 384,
+  "heads": 6,
+  "vocab_size": 8192,
+  "context": 512,
+  "lookback": null,
+  "learning_rate": 0.0003,
+  "max_steps": 12000,
+  "token_budget": 32000000,
+  "eval_steps": 500,
+  "batch_size": 4,
+  "accumulation": 4,
+  "objective": "ce",
+  "pool_shares": null,
+  "author_balance": 0.0,
+  "written_prompts": [
+    "Mary set the last candle in the window. Outside, the snow had covered the path to her grandfather's cottage. When a knock sounded at the door, she",
+    "The children had saved their pennies for a Christmas present, but on the way to the shop they found a little boy sitting alone in the snow."
+  ]
+}

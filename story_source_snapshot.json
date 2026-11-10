@@ -1,0 +1,2131 @@
+{
+  "schema": 1,
+  "source_snapshot_only": true,
+  "cutoff_inclusive": 1920,
+  "original_source_ids": [
+    "10679",
+    "10707",
+    "10723",
+    "11084",
+    "12881",
+    "12971",
+    "13379",
+    "1392",
+    "1394",
+    "1415",
+    "14202",
+    "14526",
+    "14534",
+    "14573",
+    "14606",
+    "14624",
+    "1467",
+    "14723",
+    "14835",
+    "14946",
+    "15044",
+    "15709",
+    "15826",
+    "15936",
+    "16052",
+    "16134",
+    "16454",
+    "17456",
+    "17510",
+    "17770",
+    "17937",
+    "1902",
+    "19384",
+    "19988",
+    "20018",
+    "20180",
+    "20187",
+    "20200",
+    "20213",
+    "20251",
+    "20425",
+    "20453",
+    "20516",
+    "22665",
+    "22696",
+    "23063",
+    "23278",
+    "23511",
+    "23540",
+    "23569",
+    "24310",
+    "25869",
+    "25896",
+    "25927",
+    "26015",
+    "26215",
+    "26779",
+    "2731",
+    "27612",
+    "27697",
+    "27741",
+    "28098",
+    "28110",
+    "28198",
+    "28307",
+    "28308",
+    "30907",
+    "31103",
+    "31993",
+    "31997",
+    "32520",
+    "33666",
+    "34045",
+    "34465",
+    "34571",
+    "34665",
+    "35178",
+    "35397",
+    "36089",
+    "36255",
+    "36431",
+    "37152",
+    "3719",
+    "38279",
+    "38555",
+    "38564",
+    "39210",
+    "39753",
+    "40269",
+    "40401",
+    "40463",
+    "40723",
+    "41604",
+    "41831",
+    "42919",
+    "42923",
+    "42961",
+    "43190",
+    "43763",
+    "4384",
+    "44547",
+    "44796",
+    "45103",
+    "45666",
+    "46",
+    "460",
+    "47333",
+    "47897",
+    "479",
+    "48325",
+    "48747",
+    "50274",
+    "519",
+    "51942",
+    "520",
+    "52935",
+    "5303",
+    "53402",
+    "53920",
+    "54803",
+    "55143",
+    "55281",
+    "5591",
+    "56410",
+    "56599",
+    "57413",
+    "58409",
+    "58558",
+    "58762",
+    "5949",
+    "59594",
+    "5963",
+    "61193",
+    "64094",
+    "64103",
+    "64107",
+    "64117",
+    "64124",
+    "64152",
+    "644",
+    "653",
+    "65830",
+    "67034",
+    "67105",
+    "67194",
+    "67255",
+    "678",
+    "68424",
+    "68590",
+    "69068",
+    "69097",
+    "69416",
+    "69601",
+    "69685",
+    "69782",
+    "69854",
+    "70097",
+    "70198",
+    "70273",
+    "70279",
+    "70291",
+    "70294",
+    "704",
+    "70521",
+    "71029",
+    "71547",
+    "71698",
+    "71759",
+    "71907",
+    "721",
+    "72453",
+    "72586",
+    "72610",
+    "72621",
+    "74537",
+    "74849",
+    "74860",
+    "75031",
+    "75482",
+    "75689",
+    "77220",
+    "78374",
+    "79517",
+    "79846",
+    "809",
+    "8694",
+    "9179"
+  ],
+  "sources": [
+    {
+      "id": "10360",
+      "url": "https://www.gutenberg.org/cache/epub/10360/pg10360.txt",
+      "title": "Kitty's Class Day and Other Stories",
+      "author": "Louisa May Alcott",
+      "language": "English",
+      "raw_sha256": "02929f50a5fca5418d79990129524eaed9695a2057798d5b2d74cbd63b94f271",
+      "body_sha256": "3b777ecc01cb22daafb45e717ff57512d43ead54b0b955778d7f511bd70e800b"
+    },
+    {
+      "id": "10679",
+      "url": "https://www.gutenberg.org/cache/epub/10679/pg10679.txt",
+      "title": "The Story of the Other Wise Man",
+      "author": "Henry Van Dyke",
+      "language": "English",
+      "raw_sha256": "6ad46d8da00766cd1117d9745b21ff71ab123d36e56299fdf1467cf08f412622",
+      "body_sha256": "7e181dee545b797e7874de7ea1f190bd03a8972fefa95d6ed4403842fc6dca3d"
+    },
+    {
+      "id": "10707",
+      "url": "https://www.gutenberg.org/cache/epub/10707/pg10707.txt",
+      "title": "A Christmas Mystery: The Story of Three Wise Men",
+      "author": "William John Locke",
+      "language": "English",
+      "raw_sha256": "8bd459a20f5cb8f28bdb1e07c9d87c3e1f4190a9cd454c0a2b413e73fff61ee4",
+      "body_sha256": "49d29ced769e8ca51d65617f60698da1d6fb4f991456b97836d8b28cce9305dc"
+    },
+    {
+      "id": "11084",
+      "url": "https://www.gutenberg.org/cache/epub/11084/pg11084.txt",
+      "title": "Sonny, a Christmas Guest",
+      "author": "Ruth McEnery Stuart",
+      "language": "English",
+      "raw_sha256": "ce9e22d8cb69ec897540db4c76344cda7ca10fbb2869f6e949823074b2c1848c",
+      "body_sha256": "846242a057eb86b8e9f3c30e2886850a70f17489421e165d2ca338b8474c76f0"
+    },
+    {
+      "id": "12881",
+      "url": "https://www.gutenberg.org/cache/epub/12881/pg12881.txt",
+      "title": "Mrs. Budlong's Christmas Presents",
+      "author": "Rupert Hughes",
+      "language": "English",
+      "raw_sha256": "c4ce9ecf7d2c2254ca9cf48010d589723e3a65ae64ade52d338ea096804a5201",
+      "body_sha256": "c6a9e8382f8a1da0dc7459bea5ef813b01645054b28d3850499b9944f4b7443e"
+    },
+    {
+      "id": "12971",
+      "url": "https://www.gutenberg.org/cache/epub/12971/pg12971.txt",
+      "title": "The Man in Lonely Land",
+      "author": "Kate Langley Bosher",
+      "language": "English",
+      "raw_sha256": "83a90160f1892e56cf4310796e62b7bf5722c7f11bce3bf2dd101d5e5571cba6",
+      "body_sha256": "e2ec86b5098202f55c65f16c899264e619a883cb0dc932671dbbb5b033ceb57a"
+    },
+    {
+      "id": "13379",
+      "url": "https://www.gutenberg.org/cache/epub/13379/pg13379.txt",
+      "title": "The Two Elsies",
+      "author": "Martha Finley",
+      "language": "English",
+      "raw_sha256": "354d5c06ad02e6b75b5f07b0e2e4f17f73c54fed09a90966c332aeacbf576dd6",
+      "body_sha256": "5084a5cd1f8a3798579285b8fe1732bf2812c9b4159c5bd0ddcdb01fbaf43af5"
+    },
+    {
+      "id": "1392",
+      "url": "https://www.gutenberg.org/cache/epub/1392/pg1392.txt",
+      "title": "The Seven Poor Travellers",
+      "author": "Charles Dickens",
+      "language": "English",
+      "raw_sha256": "5555647b72bdb2296a32a49047f9d67a85eb73250d52380571f7bfe5e6bec017",
+      "body_sha256": "93d6364248324a4f3dea4717a5d96cfe1a42f47c282679b751147619575cc4b0"
+    },
+    {
+      "id": "1394",
+      "url": "https://www.gutenberg.org/cache/epub/1394/pg1394.txt",
+      "title": "The Holly-Tree",
+      "author": "Charles Dickens",
+      "language": "English",
+      "raw_sha256": "5c8c4cbd944457343832f73e1e62b7ab41bcac45cf8819bee37f532af4a1a412",
+      "body_sha256": "40e499822a7b1abd6726ee808155346619455fb5a8e39467ebfe2ccbe64b7a64"
+    },
+    {
+      "id": "1415",
+      "url": "https://www.gutenberg.org/cache/epub/1415/pg1415.txt",
+      "title": "Doctor Marigold",
+      "author": "Charles Dickens",
+      "language": "English",
+      "raw_sha256": "86dcabb47b57cd52bca32304069cfb3e9582848d40b488e70d43229d207fb615",
+      "body_sha256": "755183ec57bb01f15f19faf9b8f7e2d9087af94269062f79593dca2ebd04b00b"
+    },
+    {
+      "id": "14202",
+      "url": "https://www.gutenberg.org/cache/epub/14202/pg14202.txt",
+      "title": "Little Prudy's Sister Susy",
+      "author": "Sophie May",
+      "language": "English",
+      "raw_sha256": "e68dbfea9a6473d2eeda5eb4e1445e518a9e3deb8557b5b7bcbc016902db3001",
+      "body_sha256": "eec36045645fb3b1d3d3408642e8eca48e4725765772ae22d226dd7cfe09a384"
+    },
+    {
+      "id": "14526",
+      "url": "https://www.gutenberg.org/cache/epub/14526/pg14526.txt",
+      "title": "The Little City of Hope: A Christmas Story",
+      "author": "F. Marion Crawford",
+      "language": "English",
+      "raw_sha256": "cb4c8008ba2bf22399cfda5fcfc3915c61d70c6111179ee6044e343f2c666054",
+      "body_sha256": "da4be202aaacf479a30be28d6309c620791781a3af2157d1a92dd0af9bbad65d"
+    },
+    {
+      "id": "14534",
+      "url": "https://www.gutenberg.org/cache/epub/14534/pg14534.txt",
+      "title": "Christmas with Grandma Elsie",
+      "author": "Martha Finley",
+      "language": "English",
+      "raw_sha256": "22713f410682823ae9a9f514b4cd8bc72167952c92704a40eb3c5f66e62f2412",
+      "body_sha256": "001af205f71f4fdfcdaf3a4d8de4cd611a4d4e66a9c422b00a6201923831d5c7"
+    },
+    {
+      "id": "14573",
+      "url": "https://www.gutenberg.org/cache/epub/14573/pg14573.txt",
+      "title": "The Truce of God",
+      "author": "Mary Roberts Rinehart",
+      "language": "English",
+      "raw_sha256": "0f72438a78504ca7cb880daf70f6c34c7adb98f9ec3a6244984a56decbaec58b",
+      "body_sha256": "a793bf2ee773dd0206e78d3e46974715da2940790bdd963b1d7e165eedb83c65"
+    },
+    {
+      "id": "14606",
+      "url": "https://www.gutenberg.org/cache/epub/14606/pg14606.txt",
+      "title": "And Thus He Came: A Christmas Fantasy",
+      "author": "Cyrus Townsend Brady",
+      "language": "English",
+      "raw_sha256": "903cddb97f3d4cbde58e723557f95ed8319a041710533326ce7a6a57767f7a20",
+      "body_sha256": "84fd864282ad64facead3b1a08378c528aedb100d3f4f22ccea0e28831fc6007"
+    },
+    {
+      "id": "14624",
+      "url": "https://www.gutenberg.org/cache/epub/14624/pg14624.txt",
+      "title": "Santa Claus's Partner",
+      "author": "Thomas Nelson Page",
+      "language": "English",
+      "raw_sha256": "117825b6a411d2b77c4f71c80d5645a7890f92d1d9770af2734876c6d221d1b4",
+      "body_sha256": "cfeafccfd40ad3e49c523ae62a9560aba381d955a02be9098f6ccb31df838ef5"
+    },
+    {
+      "id": "14723",
+      "url": "https://www.gutenberg.org/cache/epub/14723/pg14723.txt",
+      "title": "How It Happened",
+      "author": "Kate Langley Bosher",
+      "language": "English",
+      "raw_sha256": "cb051d41b8a39736f5a65dad33ceb103877f72c70e0ae06e72e87d67932e9374",
+      "body_sha256": "1145c587e16622c04f9c60c2bd4a301919012eb3f140dd5c0d777c30694b7013"
+    },
+    {
+      "id": "14835",
+      "url": "https://www.gutenberg.org/cache/epub/14835/pg14835.txt",
+      "title": "The Burglar and the Blizzard: A Christmas Story",
+      "author": "Alice Duer Miller",
+      "language": "English",
+      "raw_sha256": "f13f05423361481e33c1334ae1ea8c004b129fbe716d796e68c9a190c6030fdc",
+      "body_sha256": "9f56467543484bda55d1e43c1af2e50f0f00bf3cdc0c856a6d7b53922b049a9f"
+    },
+    {
+      "id": "14946",
+      "url": "https://www.gutenberg.org/cache/epub/14946/pg14946.txt",
+      "title": "The Blossoming Rod",
+      "author": "Mary Stewart Cutting",
+      "language": "English",
+      "raw_sha256": "3d302690359239f8321df3e4c248a59680a28001ce2c445af6c4f751afb817f9",
+      "body_sha256": "e0e8afce2aed8191509cf8b811c7ca750d9245db133a7db354a7ddf174e88b81"
+    },
+    {
+      "id": "15044",
+      "url": "https://www.gutenberg.org/cache/epub/15044/pg15044.txt",
+      "title": "A Reversible Santa Claus",
+      "author": "Meredith Nicholson",
+      "language": "English",
+      "raw_sha256": "0c352bd6ec3fee42937f980682403521302d2efeff77d43e581083d4f8ec84b3",
+      "body_sha256": "51d2f8840259e475662fad5d09eb8fb0c82a2b85c0cdc3f0fe0530cd17b4f1d8"
+    },
+    {
+      "id": "15169",
+      "url": "https://www.gutenberg.org/cache/epub/15169/pg15169.txt",
+      "title": "The Bobbsey Twins in a Great City",
+      "author": "Laura Lee Hope",
+      "language": "English",
+      "raw_sha256": "5384542026d0f56d8701ed51724ffa62088c314f72312d41d57cabf9028eda15",
+      "body_sha256": "9311694956fe15e9fd15ad929955a551575634bdda1f5d925e28fd032412c6b4"
+    },
+    {
+      "id": "15709",
+      "url": "https://www.gutenberg.org/cache/epub/15709/pg15709.txt",
+      "title": "The Christmas Angel",
+      "author": "Abbie Farwell Brown",
+      "language": "English",
+      "raw_sha256": "c07608dd6a4f492817c865ffcd4c310a15a79e60da8a2dc0b7dd7e4dc2635a42",
+      "body_sha256": "e43b4a1cc6c26505766b5b238f4b3ecc2bd0756807e4dce0c91199a3fac61c24"
+    },
+    {
+      "id": "15826",
+      "url": "https://www.gutenberg.org/cache/epub/15826/pg15826.txt",
+      "title": "Uncle Noah's Christmas Inspiration",
+      "author": "Leona Dalrymple",
+      "language": "English",
+      "raw_sha256": "6af5b45bd7c438244ff2834b235f52e1d94527d3fac0373c8da12ffddae968c2",
+      "body_sha256": "b3c782a2ee4a264eaa67a061bcd2917582bcd73a86b8cdd4e1d0789c30875ad5"
+    },
+    {
+      "id": "15936",
+      "url": "https://www.gutenberg.org/cache/epub/15936/pg15936.txt",
+      "title": "The Sad Shepherd: A Christmas Story",
+      "author": "Henry Van Dyke",
+      "language": "English",
+      "raw_sha256": "98665afea3a74fee5724430c9d1a2c6b64fc2172cd1bc225ddbaa4deb9bd3b48",
+      "body_sha256": "ec00502172a42f0e61be91d0e5899f9e59972d6363ab65c603e0c5b43a57ae9c"
+    },
+    {
+      "id": "16134",
+      "url": "https://www.gutenberg.org/cache/epub/16134/pg16134.txt",
+      "title": "The First Christmas Tree: A Story of the Forest",
+      "author": "Henry Van Dyke",
+      "language": "English",
+      "raw_sha256": "80c1e3339c0fc955f0e981671472bc9ad22aedaa1360040dd03aaa403993ef9c",
+      "body_sha256": "2c0354f8c23fbb5499d1c9a315adc369bce1c07034afac3464f9b6d37a346100"
+    },
+    {
+      "id": "16454",
+      "url": "https://www.gutenberg.org/cache/epub/16454/pg16454.txt",
+      "title": "The Upas Tree: A Christmas Story for all the Year",
+      "author": "Florence L. Barclay",
+      "language": "English",
+      "raw_sha256": "47fb1a9c0c2cb751fc5fef864cafad8d492a8bc08e0c019aa9df1b6086b49714",
+      "body_sha256": "287c6e013b8c5456e43c756ae8d3db7cc7cff8cb6a2acd86cdf1121f7d8a0d8b"
+    },
+    {
+      "id": "17456",
+      "url": "https://www.gutenberg.org/cache/epub/17456/pg17456.txt",
+      "title": "The Romance of a Christmas Card",
+      "author": "Kate Douglas Smith Wiggin",
+      "language": "English",
+      "raw_sha256": "f8b5bb3e296d3a5f6b8e3ee06d18dff269f7a86bd157fc4723b499b14d151598",
+      "body_sha256": "d398df005735c07adee1238d43d86eb553db497c3ae4461d9e1dc9e4171400cf"
+    },
+    {
+      "id": "17510",
+      "url": "https://www.gutenberg.org/cache/epub/17510/pg17510.txt",
+      "title": "When the Yule Log Burns: A Christmas Story",
+      "author": "Leona Dalrymple",
+      "language": "English",
+      "raw_sha256": "47a8390397624902b503486491ee4672a86aba63ec6aafa5694fa414e863ee42",
+      "body_sha256": "f529d2f1c40e27aba168c168002e700a33756332a4f50c6142a310bef99562ed"
+    },
+    {
+      "id": "17530",
+      "url": "https://www.gutenberg.org/cache/epub/17530/pg17530.txt",
+      "title": "Maida's Little Shop",
+      "author": "Inez Haynes Gillmore",
+      "language": "English",
+      "raw_sha256": "d369e2871f53f967945875d8fc9e711d5d2d79f66bde8a5377cec067254e02d2",
+      "body_sha256": "e671148785234ff923be425b495857f917ad7aa54a18a1055b67955a1e4a838d"
+    },
+    {
+      "id": "17761",
+      "url": "https://www.gutenberg.org/cache/epub/17761/pg17761.txt",
+      "title": "Six little Bunkers at Grandpa Ford's",
+      "author": "Laura Lee Hope",
+      "language": "English",
+      "raw_sha256": "c6afc9f275b8d6a406d5de4e9b309c6f5c934a60e0534ff5fc87407ae3df5893",
+      "body_sha256": "ba0ccb9047bfc9c2495943c69b61fc00d4adc24dbe930bb583a473c6de6a2b7e"
+    },
+    {
+      "id": "17878",
+      "url": "https://www.gutenberg.org/cache/epub/17878/pg17878.txt",
+      "title": "Bunny Brown and his Sister Sue Giving a Show",
+      "author": "Laura Lee Hope",
+      "language": "English",
+      "raw_sha256": "9a13cd8a503ff8fc08687044ad48d262a6949956f80ee1b70001dba65f2f574f",
+      "body_sha256": "a07c79b0dd4f416e295ef7bb9acdb1cdb89f95f9aa509db47fb8691ae43432e8"
+    },
+    {
+      "id": "17888",
+      "url": "https://www.gutenberg.org/cache/epub/17888/pg17888.txt",
+      "title": "Comfort Pease and her Gold Ring",
+      "author": "Mary Eleanor Wilkins Freeman",
+      "language": "English",
+      "raw_sha256": "fc8692144a1b4011e764b258c5dc0a2cc3dab49004ae57821e1f6c76f895d0c1",
+      "body_sha256": "5daadab1caf8eec8303882172c22a3b0787e00ccd99d47c597c259f3eb66318a"
+    },
+    {
+      "id": "17937",
+      "url": "https://www.gutenberg.org/cache/epub/17937/pg17937.txt",
+      "title": "The Thin Santa Claus: The Chicken Yard That Was a Christmas Stocking",
+      "author": "Ellis Parker Butler",
+      "language": "English",
+      "raw_sha256": "d6fd3de3a81acebc178b5c857fc82511d918636b6df8f6ba2f2e91d62ab83cb7",
+      "body_sha256": "804dd11d787459cd4844b3100ce3a95c3407d097e477284b4b9c1f5485df4282"
+    },
+    {
+      "id": "18420",
+      "url": "https://www.gutenberg.org/cache/epub/18420/pg18420.txt",
+      "title": "The Bobbsey Twins at Home",
+      "author": "Laura Lee Hope",
+      "language": "English",
+      "raw_sha256": "5049acf7f657df479053ced524569a34e37bcbcbf81df148718116473ec43c39",
+      "body_sha256": "00560f7d91a2a2f721584a66530dfb2ba6fe49d0d79568f2116d851d2f4cc8a6"
+    },
+    {
+      "id": "1902",
+      "url": "https://www.gutenberg.org/cache/epub/1902/pg1902.txt",
+      "title": "The Old Peabody Pew: A Christmas Romance of a Country Church",
+      "author": "Kate Douglas Smith Wiggin",
+      "language": "English",
+      "raw_sha256": "9952db8da810f67b9a9c9355871e47b0f60c9fa2ef2930e76fb17c7d60b6393a",
+      "body_sha256": "c197217635d513a6e8af0f215faf65ffc8e621f0a8cf02ca3a4b08e9b9244f5d"
+    },
+    {
+      "id": "19384",
+      "url": "https://www.gutenberg.org/cache/epub/19384/pg19384.txt",
+      "title": "On Christmas Day In The Evening",
+      "author": "Grace S. Richmond",
+      "language": "English",
+      "raw_sha256": "1a7a671c089fb7103731d6bd4161327fc9f410c2186f96ec250b77f6f09b7263",
+      "body_sha256": "7c82c48a33a7fde7df523c12da470e3275990c439088f69bc3990ee9c5a110c8"
+    },
+    {
+      "id": "19766",
+      "url": "https://www.gutenberg.org/cache/epub/19766/pg19766.txt",
+      "title": "Young Lucretia and Other Stories",
+      "author": "Mary Eleanor Wilkins Freeman",
+      "language": "English",
+      "raw_sha256": "4d30283b876aa61d7bd591bee21853913c4190f73919316a1aa909b2c54c9bcb",
+      "body_sha256": "01b19bfbdb39e54750b2f1d987ff0286085607d1948eb3084b3ef8d62a65fd68"
+    },
+    {
+      "id": "19988",
+      "url": "https://www.gutenberg.org/cache/epub/19988/pg19988.txt",
+      "title": "Little Maid Marian",
+      "author": "Amy Ella Blanchard",
+      "language": "English",
+      "raw_sha256": "8fc123ce1cd6ed160e9eb130566d82f3ba519141c7cd6ab44423caf684b04111",
+      "body_sha256": "141a1cb1f80c7e75a5ebbdd03917433ea31ea7e6e39534d25fe0c1a191cb83f7"
+    },
+    {
+      "id": "20180",
+      "url": "https://www.gutenberg.org/cache/epub/20180/pg20180.txt",
+      "title": "Mr. Kris Kringle: A Christmas Tale",
+      "author": "S. Weir Mitchell",
+      "language": "English",
+      "raw_sha256": "5b8fb0f11467cde8b7681aca368eb67613a2c835a3b8a000d2876a04ed107ed9",
+      "body_sha256": "dca94c7969e3a7d2626836725afd2cafc5e8569f90b07856a22391f5ca48ed9f"
+    },
+    {
+      "id": "20187",
+      "url": "https://www.gutenberg.org/cache/epub/20187/pg20187.txt",
+      "title": "On Christmas Day in the Morning",
+      "author": "Grace S. Richmond",
+      "language": "English",
+      "raw_sha256": "52db2198511e149de66b285b5cd7af2d42ce36517e72df8bc777a192a9c1043a",
+      "body_sha256": "6a13842bf95f729449ba1fd36a5092b7aa9044fadefa05e732cd5ca9b16a60da"
+    },
+    {
+      "id": "20200",
+      "url": "https://www.gutenberg.org/cache/epub/20200/pg20200.txt",
+      "title": "Christmas, A Happy Time",
+      "author": "Alicia Catherine Mant",
+      "language": "English",
+      "raw_sha256": "46ead93f8e50733ba25ba559cdf0b7a66477608b97c728c3ed6479a38b6efd6a",
+      "body_sha256": "27eecfdba5bb14fd32c648e6d9a38438f98bd1ec22319ce7d620b243f502747b"
+    },
+    {
+      "id": "20213",
+      "url": "https://www.gutenberg.org/cache/epub/20213/pg20213.txt",
+      "title": "Peace on Earth, Good-will to Dogs",
+      "author": "Eleanor Hallowell Abbott",
+      "language": "English",
+      "raw_sha256": "bc19a7e1a174ad400a9b6be74cb34ee688f823442c50e0cb9e306e17086f2e3c",
+      "body_sha256": "2ba5c7301a38a7451609a939487bfd633de0d4de6b0688ac1bc164e036216369"
+    },
+    {
+      "id": "20251",
+      "url": "https://www.gutenberg.org/cache/epub/20251/pg20251.txt",
+      "title": "Christmas Comes but Once a Year",
+      "author": "John Leighton",
+      "language": "English",
+      "raw_sha256": "e9067435582bc11736272657e6c98b84e685b4f9802f6f26e717a34cf682c25c",
+      "body_sha256": "1e4703a2328e898c61b2b927c21f884c6e117d6cb488beb30484e331f48fb023"
+    },
+    {
+      "id": "20453",
+      "url": "https://www.gutenberg.org/cache/epub/20453/pg20453.txt",
+      "title": "The Christmas Child",
+      "author": "Hesba Stretton",
+      "language": "English",
+      "raw_sha256": "b84da9fb2407e863ae0f8d80ac1b3696878dc818a9989909d92c5083f73239ff",
+      "body_sha256": "80c63f1b0406123e57e6efbe00e23c7dc9f9b82cdc3350f5619a1d76c757214b"
+    },
+    {
+      "id": "20516",
+      "url": "https://www.gutenberg.org/cache/epub/20516/pg20516.txt",
+      "title": "Christmas: A Story",
+      "author": "Zona Gale",
+      "language": "English",
+      "raw_sha256": "9947557772555df58dee4b5d1022e1e2fd2393f8dd2643ec1e54478ad2207a8a",
+      "body_sha256": "2b96280acbd570eb9355fca5a6262cf19ffc3541e0063793c44a072861d82cd7"
+    },
+    {
+      "id": "20781",
+      "url": "https://www.gutenberg.org/cache/epub/20781/pg20781.txt",
+      "title": "Heidi",
+      "author": "Johanna Spyri",
+      "language": "English",
+      "raw_sha256": "9694a65b4aab3150d546d192918a3977c9299095fdc3e2c2947176d743b95c9d",
+      "body_sha256": "2231b9e8264f10393d8f06ef1072e77e80d3440715ef4e3363b1b86aaf96b295"
+    },
+    {
+      "id": "22234",
+      "url": "https://www.gutenberg.org/cache/epub/22234/pg22234.txt",
+      "title": "Aunt Jo's scrap-bag, Volume 5 Jimmy's cruise in the Pinafore, etc.",
+      "author": "Louisa May Alcott",
+      "language": "English",
+      "raw_sha256": "1016ad42fb4fed362a7e9eb1e59568a769d14c15d454296c850e62d7cd3700b0",
+      "body_sha256": "78a3c0fcd7194d22c204523c78995dcf43422722c9aa446739d47b95f3329de7"
+    },
+    {
+      "id": "22665",
+      "url": "https://www.gutenberg.org/cache/epub/22665/pg22665.txt",
+      "title": "Christian Gellert's Last Christmas",
+      "author": "Berthold Auerbach",
+      "language": "English",
+      "raw_sha256": "26dc736671de9bd924e0d034fe15913634940a7740542b973f73f67554520dac",
+      "body_sha256": "1d630c99761dc48b041219774d5f5861a2dcaaf15277f636181bceb01eb491e2"
+    },
+    {
+      "id": "22696",
+      "url": "https://www.gutenberg.org/cache/epub/22696/pg22696.txt",
+      "title": "Colonel Crockett's Co-operative Christmas",
+      "author": "Rupert Hughes",
+      "language": "English",
+      "raw_sha256": "3e433de2f70ef4e91402919b2e93064f6b3c7d101872ec63806d8aa5a9207f19",
+      "body_sha256": "5cf85e386703b9843bf422d4da3dc961acae55dba7bc97c572f3dd16f0bdb272"
+    },
+    {
+      "id": "23063",
+      "url": "https://www.gutenberg.org/cache/epub/23063/pg23063.txt",
+      "title": "The Lost Child",
+      "author": "François Coppée",
+      "language": "English",
+      "raw_sha256": "09dc3d11b2aff60edd62b5fbe04794f68e9b0580e789e8f318184886962726b7",
+      "body_sha256": "aeaba77f9beafd1ff0261d56370afe81451ceda4ba434c5550487c562d458b17"
+    },
+    {
+      "id": "23278",
+      "url": "https://www.gutenberg.org/cache/epub/23278/pg23278.txt",
+      "title": "Janice Day at Poketown",
+      "author": "Helen Beecher Long",
+      "language": "English",
+      "raw_sha256": "bec7efbda3363e7ff922fd13266b6af1c31dae31990c05dc61458bb72bba8aed",
+      "body_sha256": "796d61456ec8a32802beab9d375b301171f4d1e4f297c79f3a2cbdee37d914e0"
+    },
+    {
+      "id": "23511",
+      "url": "https://www.gutenberg.org/cache/epub/23511/pg23511.txt",
+      "title": "The Christmas Peace",
+      "author": "Thomas Nelson Page",
+      "language": "English",
+      "raw_sha256": "7d764ddd72a2205895aacbcecc09cf7da105d489d80d42f1375c21d98d21be5c",
+      "body_sha256": "d122e68b1b36467c3035de73274fe2a00a2a2fcb09db7db44c82ed98513880a4"
+    },
+    {
+      "id": "23540",
+      "url": "https://www.gutenberg.org/cache/epub/23540/pg23540.txt",
+      "title": "The Twin Cousins",
+      "author": "Sophie May",
+      "language": "English",
+      "raw_sha256": "0910a8a1c5cca6db1664142ddb1b7af968b552b7a2c6d67f0f2f1c728c06210a",
+      "body_sha256": "58b443912242c36386839c6b723096bf7f324e151fe436c7dad9dfce7a2b75fb"
+    },
+    {
+      "id": "23569",
+      "url": "https://www.gutenberg.org/cache/epub/23569/pg23569.txt",
+      "title": "Christmas Holidays at Merryvale",
+      "author": "Alice Hale Burnett",
+      "language": "English",
+      "raw_sha256": "e2db0cc4df906c0cd4dea59232aa86602cab6b9c132c15f10aadd7bcd957ad5c",
+      "body_sha256": "648e2433866a7d894b0c054e78706163b27d95c3c6aa492c3770c4a428a8b22f"
+    },
+    {
+      "id": "24310",
+      "url": "https://www.gutenberg.org/cache/epub/24310/pg24310.txt",
+      "title": "Candle and Crib",
+      "author": "K. F. Purdon",
+      "language": "English",
+      "raw_sha256": "e11fe03f50922646d03d98cac1a9f0f22cf07f90240273ccb7f7d2de5ab04bbd",
+      "body_sha256": "0420f24e15d4b203cc2b3e25aaf85e47db378c0e5b67285003d2d9b197afc54a"
+    },
+    {
+      "id": "24873",
+      "url": "https://www.gutenberg.org/cache/epub/24873/pg24873.txt",
+      "title": "Lucy Maud Montgomery Short Stories, 1896 to 1901",
+      "author": "L. M. Montgomery",
+      "language": "English",
+      "raw_sha256": "218cabcc59d4f8a20f5432f6b364ab38e7ff3789473b88c5f58d8ad09c2bb234",
+      "body_sha256": "e9f2b50826164f8ddddc37c05801566af542db7670103fd0a5df837422344f0f"
+    },
+    {
+      "id": "24874",
+      "url": "https://www.gutenberg.org/cache/epub/24874/pg24874.txt",
+      "title": "Lucy Maud Montgomery Short Stories, 1902 to 1903",
+      "author": "L. M. Montgomery",
+      "language": "English",
+      "raw_sha256": "ae33b2d1e1abf1368877acecd0264bc6b0ad33050e724f190c2512bba49db768",
+      "body_sha256": "9917d36bb692de2d03e14e02fd1426cf5f47d0f11e793e3c28d8a4e561d59961"
+    },
+    {
+      "id": "24876",
+      "url": "https://www.gutenberg.org/cache/epub/24876/pg24876.txt",
+      "title": "Lucy Maud Montgomery Short Stories, 1905 to 1906",
+      "author": "L. M. Montgomery",
+      "language": "English",
+      "raw_sha256": "ba887f2919b14d5bbc1d6acba15d28a46186eb1befe3239d41f5af2b5ca397b1",
+      "body_sha256": "c4943a16c5740a2e7c2691245a4c166db306badaa16a050acbbc611bbe154b8f"
+    },
+    {
+      "id": "24878",
+      "url": "https://www.gutenberg.org/cache/epub/24878/pg24878.txt",
+      "title": "Lucy Maud Montgomery Short Stories, 1909 to 1922",
+      "author": "L. M. Montgomery",
+      "language": "English",
+      "raw_sha256": "3be4bc4bd79dab444b4bf24715dbae6aa373e28eaf9664964502109ab358088e",
+      "body_sha256": "55a5ce4ac8b28212f3f8265c69c62761d6a3c98b69f6f8841acaaecad977817c"
+    },
+    {
+      "id": "25869",
+      "url": "https://www.gutenberg.org/cache/epub/25869/pg25869.txt",
+      "title": "Patty's Success",
+      "author": "Carolyn Wells",
+      "language": "English",
+      "raw_sha256": "c6bb18e1f048608dda80687d301dd8425dda2073d35b43b919ff23a3cdb2649d",
+      "body_sha256": "4f3a8a032c5b5e46ee2b0cd13c246b426bb2408c31cc391f353179c1a74fc9cc"
+    },
+    {
+      "id": "25896",
+      "url": "https://www.gutenberg.org/cache/epub/25896/pg25896.txt",
+      "title": "Tommy Trot's Visit to Santa Claus",
+      "author": "Thomas Nelson Page",
+      "language": "English",
+      "raw_sha256": "e38aeef0a5d22b1ab0d1528f7bb0673877e010b71c41f6dcd8ee443df56867fb",
+      "body_sha256": "5eeb9d533c96914fa2aca54fbb189edd1a034e44990c04a2f3407fd9398444b1"
+    },
+    {
+      "id": "25927",
+      "url": "https://www.gutenberg.org/cache/epub/25927/pg25927.txt",
+      "title": "The Christmas Story from David Harum",
+      "author": "Edward Noyes Westcott",
+      "language": "English",
+      "raw_sha256": "09e10392d406b33e9fbbfa692bbbda82652757cb73b035e5b03e5ce41ccf022d",
+      "body_sha256": "5045286191682140e738e02f768b9ffd891e9a92b8bbcba96d64ee2786703c62"
+    },
+    {
+      "id": "26015",
+      "url": "https://www.gutenberg.org/cache/epub/26015/pg26015.txt",
+      "title": "A Christmas Posy",
+      "author": "Mrs. Molesworth",
+      "language": "English",
+      "raw_sha256": "c56050b651db87589a807dae9533747aa24f22c8bb1f06754b95f58a7cb7daaa",
+      "body_sha256": "5694fc574480614693ca8f6160554623c622e7f3d44ae5aa4f205a285dcc0241"
+    },
+    {
+      "id": "26041",
+      "url": "https://www.gutenberg.org/cache/epub/26041/pg26041.txt",
+      "title": "Aunt Jo's scrap bag, Volume 1 My boys, etc.",
+      "author": "Louisa May Alcott",
+      "language": "English",
+      "raw_sha256": "c8c5349eb4446f29948da9b2ba46fa55c4e5b5fbc4b50996dae8be567340b0fe",
+      "body_sha256": "9a3eb870b0202178833ba3f0016df9c9d9fa584e6b53476c72658656c2ea585e"
+    },
+    {
+      "id": "26215",
+      "url": "https://www.gutenberg.org/cache/epub/26215/pg26215.txt",
+      "title": "The Little Colonel's Christmas Vacation",
+      "author": "Annie F. Johnston",
+      "language": "English",
+      "raw_sha256": "1f1ace77655bb50040861701ce192a508989c1280202ad2eb8c10abaeb0340d8",
+      "body_sha256": "dcc6d342f1bbd6738465f5613f470dd9c3d821072be8eacccac5e1acf42c480e"
+    },
+    {
+      "id": "26779",
+      "url": "https://www.gutenberg.org/cache/epub/26779/pg26779.txt",
+      "title": "The Ghost",
+      "author": "William Douglas O'Connor",
+      "language": "English",
+      "raw_sha256": "8b289f6040b7bbd7f3f4078ba6911481c2c92a406505ecd516f7b4eacbeb6244",
+      "body_sha256": "49a22c2b83ffab90aee142f3f55c1ef03fac872a01dbbe0e9a163369370b8e63"
+    },
+    {
+      "id": "27567",
+      "url": "https://www.gutenberg.org/cache/epub/27567/pg27567.txt",
+      "title": "Aunt Jo's scrap-bag, Volume 6 An old-fashioned Thanksgiving, etc.",
+      "author": "Louisa May Alcott",
+      "language": "English",
+      "raw_sha256": "127dd5c5e8bfc8b2b727ca7cd24e550ba289386f31056fe6061d7a7ba72fa8d5",
+      "body_sha256": "5f1913e0f855e7b0f83db654dc064f081daf46a56a18140b5499de97296b87a9"
+    },
+    {
+      "id": "27612",
+      "url": "https://www.gutenberg.org/cache/epub/27612/pg27612.txt",
+      "title": "Christmas Eve at Swamp's End",
+      "author": "Norman Duncan",
+      "language": "English",
+      "raw_sha256": "837a0a5d7ed7dc858c6158fa6dee6b7f21dab3c4f00944a894dcbbc7976f17ae",
+      "body_sha256": "daa27451d93374927fdb08e58cb7918f3f0afd8cbe2feca8a840820c60cf561f"
+    },
+    {
+      "id": "27697",
+      "url": "https://www.gutenberg.org/cache/epub/27697/pg27697.txt",
+      "title": "The Mouse and The Moonbeam",
+      "author": "Eugene Field",
+      "language": "English",
+      "raw_sha256": "abadf502f2ca49819a4aec0b46d00d2d18d47b82a81eb2a439cc5c78a3b07df9",
+      "body_sha256": "264db31fd166ba3f1f8054aaff4d93ca646430eed8f3114f200d203467f6790e"
+    },
+    {
+      "id": "2786",
+      "url": "https://www.gutenberg.org/cache/epub/2786/pg2786.txt",
+      "title": "Jack and Jill",
+      "author": "Louisa May Alcott",
+      "language": "English",
+      "raw_sha256": "2966f02e17fb1cf01c21f90b1b694ee4503a5434cf398ec1a24955d5ce6a3b73",
+      "body_sha256": "23e2c98accf86bbcfe8135f3df74649131b865a816152738bd5fcc88427d5323"
+    },
+    {
+      "id": "28110",
+      "url": "https://www.gutenberg.org/cache/epub/28110/pg28110.txt",
+      "title": "Jimsy: The Christmas Kid",
+      "author": "Leona Dalrymple",
+      "language": "English",
+      "raw_sha256": "266c253a74b83a0ca1cdef117d235843919ef24473937a49780ab3eafd1b4054",
+      "body_sha256": "6e2bccd3205015c7f6ccfa20fa745a679e736dc03da3b5dda1d7fe4e8e718a4c"
+    },
+    {
+      "id": "28308",
+      "url": "https://www.gutenberg.org/cache/epub/28308/pg28308.txt",
+      "title": "The Children's Book of Christmas Stories",
+      "author": "Unknown",
+      "language": "English",
+      "raw_sha256": "e5196607356230205feb8fa068a5911a81b4e66942f8ca49db92a8367dab59d5",
+      "body_sha256": "03c7246f1da819606b80feb0ce293a51b4cd796e44f2eb691681911a246c5132"
+    },
+    {
+      "id": "30907",
+      "url": "https://www.gutenberg.org/cache/epub/30907/pg30907.txt",
+      "title": "Rosemary in Search of a Father",
+      "author": "C. N. Williamson A. M. Williamson",
+      "language": "English",
+      "raw_sha256": "d4388f228fab879b3ce04ebfe16c663016749970acd26af974c5f28276474cbb",
+      "body_sha256": "cc884379552b26cda013612df18372e9f3dcdca6ca4133460bcb5b9fd86d8f11"
+    },
+    {
+      "id": "316",
+      "url": "https://www.gutenberg.org/cache/epub/316/pg316.txt",
+      "title": "The Golden Road",
+      "author": "L. M. Montgomery",
+      "language": "English",
+      "raw_sha256": "869c054eb7a4eb22f2fdfa5ddc43172aaad570551c84026ae9c34fdfa1d30e73",
+      "body_sha256": "4e297dfe9adc9cc9b0624f1a89b7d37290e3b768fe42198a819772a6d3eddbe5"
+    },
+    {
+      "id": "31993",
+      "url": "https://www.gutenberg.org/cache/epub/31993/pg31993.txt",
+      "title": "'Round the yule-log: Christmas in Norway",
+      "author": "Peter Christen Asbjørnsen",
+      "language": "English",
+      "raw_sha256": "e6adca6e92cde8c7c401d37a7a731f8440147a2d7dfe92c3320ad6ffb602d009",
+      "body_sha256": "6e38f5eb282a7555eaf17f498a3efe9c45070ce56fab30119333ce0ae3387c0a"
+    },
+    {
+      "id": "31997",
+      "url": "https://www.gutenberg.org/cache/epub/31997/pg31997.txt",
+      "title": "Miss Muffet's Christmas Party",
+      "author": "Samuel McChord Crothers",
+      "language": "English",
+      "raw_sha256": "5e8ad125db868e75fedb00e20b1a54f3dd74ba3826e25358355a15fba1430888",
+      "body_sha256": "13614b5aabf8b7fe064a362b6fa61f95db9c59ea48edfd4c34dd19743438d322"
+    },
+    {
+      "id": "32090",
+      "url": "https://www.gutenberg.org/cache/epub/32090/pg32090.txt",
+      "title": "The Curlytops Snowed In; Or, Grand Fun with Skates and Sleds",
+      "author": "Howard Roger Garis",
+      "language": "English",
+      "raw_sha256": "66ace75175a92792300a07d8acd63fa98409f712ef1b30b6e0207bde32f76845",
+      "body_sha256": "813989ac61191cd26364d87c593546a165949bd19522d0900c4383e6f3bb9000"
+    },
+    {
+      "id": "32520",
+      "url": "https://www.gutenberg.org/cache/epub/32520/pg32520.txt",
+      "title": "Hildegarde's Harvest",
+      "author": "Laura Elizabeth Howe Richards",
+      "language": "English",
+      "raw_sha256": "56b4649249961b9670595819ed9c114d618aedf556e64c51126f6a38eb44d5f3",
+      "body_sha256": "5da647654d1682582ecbf522d72968d166f45b195e6cb3718043edaa5adc17f8"
+    },
+    {
+      "id": "33666",
+      "url": "https://www.gutenberg.org/cache/epub/33666/pg33666.txt",
+      "title": "A Captured Santa Claus",
+      "author": "Thomas Nelson Page",
+      "language": "English",
+      "raw_sha256": "b6b5192a22ae661878290b5ac0c7fea49e8609afb8a057ad55ffea2649a08fd1",
+      "body_sha256": "bd837345fb342f6bfd03b23ab0c003243a3298185bc8c2a4ba2f662c9c4ca18a"
+    },
+    {
+      "id": "34045",
+      "url": "https://www.gutenberg.org/cache/epub/34045/pg34045.txt",
+      "title": "A Christmas Child: A Sketch of a Boy-Life",
+      "author": "Mrs. Molesworth",
+      "language": "English",
+      "raw_sha256": "0c5b93a4d7e2e91acb88bcda18473dec9527b45c3a129c4be3c627268bd22467",
+      "body_sha256": "58f50d56dad198aa27d29ae01560e168d793d4f7a84989ebf4f104fe12fca983"
+    },
+    {
+      "id": "34378",
+      "url": "https://www.gutenberg.org/cache/epub/34378/pg34378.txt",
+      "title": "Hans Brinker; Or, The Silver Skates",
+      "author": "Mary Mapes Dodge",
+      "language": "English",
+      "raw_sha256": "ac65e7c6d11e41298d7707969e34ae5f7173204c2a2aa4dce0eefc8e55969da6",
+      "body_sha256": "ea4a7d8f6029a316a58a1d4cc9626390405ba9e32abeb3b9abb52d1bf71be3ef"
+    },
+    {
+      "id": "34465",
+      "url": "https://www.gutenberg.org/cache/epub/34465/pg34465.txt",
+      "title": "A Little Book of Christmas",
+      "author": "John Kendrick Bangs",
+      "language": "English",
+      "raw_sha256": "36319d4dbc2060ff518dda4996d82e917e92d6e2a2e4f02ac1a10ce9bcc0b726",
+      "body_sha256": "538284e86061aa035b9b4fbfe743e2595b4fe07b4c1e422065835b7fc37612ae"
+    },
+    {
+      "id": "35178",
+      "url": "https://www.gutenberg.org/cache/epub/35178/pg35178.txt",
+      "title": "Ben Pepper",
+      "author": "Margaret Sidney",
+      "language": "English",
+      "raw_sha256": "28896460479222ceb7b975bf9bccb71ac45213fa23fc254084e347dc678f6d37",
+      "body_sha256": "0e7b2022920ce5cf6ef870221315e9b62d312a3c9054cf0e2fcd20bd36e7a8d9"
+    },
+    {
+      "id": "36089",
+      "url": "https://www.gutenberg.org/cache/epub/36089/pg36089.txt",
+      "title": "Back at School with the Tucker Twins",
+      "author": "Nell Speed",
+      "language": "English",
+      "raw_sha256": "7b37cfad2437f65a7dafb436037a480240e66b98722adec9cd2904424da14711",
+      "body_sha256": "527540e3e7f6f05220837a9213236c4315916254abe59b2615293d0519f303a0"
+    },
+    {
+      "id": "36255",
+      "url": "https://www.gutenberg.org/cache/epub/36255/pg36255.txt",
+      "title": "The Corner House Girls' Odd Find",
+      "author": "Grace Brooks Hill",
+      "language": "English",
+      "raw_sha256": "cd2acfe809e2959c538d6c3f2fbc319d30930041d9754b07090260eb88f7eb26",
+      "body_sha256": "798e72ca0e507f3894454819166cbcf1926bb05b0311d0f70e7bded1b624ef17"
+    },
+    {
+      "id": "36431",
+      "url": "https://www.gutenberg.org/cache/epub/36431/pg36431.txt",
+      "title": "The Palace in the Garden",
+      "author": "Mrs. Molesworth",
+      "language": "English",
+      "raw_sha256": "fb2df4dedb356bcf674d51a08ff2fb14d71eef3ff5443dea18b0b63fbf848434",
+      "body_sha256": "aff664da5b9b6871ec696c64a9be4745e4c2d78bd806db9c78e9859985561921"
+    },
+    {
+      "id": "37152",
+      "url": "https://www.gutenberg.org/cache/epub/37152/pg37152.txt",
+      "title": "A Maid of Many Moods",
+      "author": "Virna Sheard",
+      "language": "English",
+      "raw_sha256": "c04ebd12631381ab721faba2fa56b16841cd68ec4a8e0b985a087f985987fb6f",
+      "body_sha256": "1f4215ee4f6febd29b4e7224d8e15f8fad55a3acf428e27e1c390c7e4c43999f"
+    },
+    {
+      "id": "3719",
+      "url": "https://www.gutenberg.org/cache/epub/3719/pg3719.txt",
+      "title": "The Mistletoe Bough",
+      "author": "Anthony Trollope",
+      "language": "English",
+      "raw_sha256": "5c429eafaf2bf710355d670a8434a3d35024660c98832d227d58a46607435c25",
+      "body_sha256": "5133d7c331561259a21e5133caf43cfdac7fbd7e5fb473c498ea526d4d4af5c6"
+    },
+    {
+      "id": "38279",
+      "url": "https://www.gutenberg.org/cache/epub/38279/pg38279.txt",
+      "title": "How John Norton the Trapper Kept His Christmas",
+      "author": "W. H. H. Murray",
+      "language": "English",
+      "raw_sha256": "29cc73d2ac2826f738b85ff814dae77318eb773656f87309964d9b824355f75d",
+      "body_sha256": "21c6364ab4d7e9fca703c4319e0bc33f967cab2d41fac30aac75dd282ca1fc74"
+    },
+    {
+      "id": "38555",
+      "url": "https://www.gutenberg.org/cache/epub/38555/pg38555.txt",
+      "title": "Dorothy Dale in the City",
+      "author": "Margaret Penrose",
+      "language": "English",
+      "raw_sha256": "9f73f10d7c18cfd676bc128d9608197075f877346aeaeccddbc6857ad32740c4",
+      "body_sha256": "fb8643127bbd0f1cdf81f9e0e816a499e1a4ec8158f58f7df8b26f3b2eb80eb8"
+    },
+    {
+      "id": "38564",
+      "url": "https://www.gutenberg.org/cache/epub/38564/pg38564.txt",
+      "title": "Happy Hearts",
+      "author": "June Isle",
+      "language": "English",
+      "raw_sha256": "e4c4d103ec85940480f32f3b4984349f5bc9cfe91ead799ac85df54617d66a82",
+      "body_sha256": "3cc98d289014f166c56ecd4c480879e021aaf962b10b1af6e5575d566fc8eb4e"
+    },
+    {
+      "id": "39210",
+      "url": "https://www.gutenberg.org/cache/epub/39210/pg39210.txt",
+      "title": "The Ice Queen",
+      "author": "Ernest Ingersoll",
+      "language": "English",
+      "raw_sha256": "de29e4104ccf18423302365aac2e5947f20aadf4e56d68e8ab59c42d8c643e4a",
+      "body_sha256": "9092904f958b618ccbe00e06c7d7be4967b6ed4a737748a20dc76e6920f5fb75"
+    },
+    {
+      "id": "39753",
+      "url": "https://www.gutenberg.org/cache/epub/39753/pg39753.txt",
+      "title": "The Misfit Christmas Puddings",
+      "author": "Consolation Club",
+      "language": "English",
+      "raw_sha256": "280b2c9041c9cf4222ba2302ad5d17fce26615b34b79189a9a5128c753c3e137",
+      "body_sha256": "392bd39e9c1f823a679d50dfadb21e69bf86a83dd553981bd7f6d29a79262654"
+    },
+    {
+      "id": "4012",
+      "url": "https://www.gutenberg.org/cache/epub/4012/pg4012.txt",
+      "title": "The Dutch Twins",
+      "author": "Lucy Fitch Perkins",
+      "language": "English",
+      "raw_sha256": "76f0924a76b0f31d3bdbb74d4e713e40659650959f840e3499a89c0cfa0434c7",
+      "body_sha256": "a056f226c34c5a06e7b87f8c9eca9a4b9b38bc444538784209427bc7e1cb207e"
+    },
+    {
+      "id": "40269",
+      "url": "https://www.gutenberg.org/cache/epub/40269/pg40269.txt",
+      "title": "At the Black Rocks",
+      "author": "Unknown",
+      "language": "English",
+      "raw_sha256": "5ee7bc04bba57fe3a9c04f379f070060897acd8c176c5166dad784d9501ed7c3",
+      "body_sha256": "83e678fdae3a517e24eaf6b18ba7c64527b96b299a5013fb83376fc8702ef654"
+    },
+    {
+      "id": "40401",
+      "url": "https://www.gutenberg.org/cache/epub/40401/pg40401.txt",
+      "title": "Three Little Women's Success: A Story for Girls",
+      "author": "Gabrielle E. Jackson",
+      "language": "English",
+      "raw_sha256": "a120b187c6b0300addd8c47d197dc9d841eba12225a7e0a84f3aad56bc1edf05",
+      "body_sha256": "d57cdd2590ff4874f94e465c0ccadf958dcfad9645be4ba3e94a5c22fe1c141b"
+    },
+    {
+      "id": "40463",
+      "url": "https://www.gutenberg.org/cache/epub/40463/pg40463.txt",
+      "title": "The Little Colonel's Holidays",
+      "author": "Annie F. Johnston",
+      "language": "English",
+      "raw_sha256": "74a77e8e7f2336bd667f194b062b8e8da647caf3fae3d4cecc66b6ac13019cc5",
+      "body_sha256": "5708dc808824e45cc61c087bffef3e63160b9bb8848fda7fa6f09b4fd9a74149"
+    },
+    {
+      "id": "40682",
+      "url": "https://www.gutenberg.org/cache/epub/40682/pg40682.txt",
+      "title": "Lulu's Library, Volume 1 (of 3)",
+      "author": "Unknown",
+      "language": "English",
+      "raw_sha256": "57b6c260a1db2595a4029ed383de681df7fb7405f52051ee293e16bc56612d37",
+      "body_sha256": "3167f087eef8da51a12e62dd47d58d487e1992f0a02f2a4ac53fc59eedb76983"
+    },
+    {
+      "id": "40723",
+      "url": "https://www.gutenberg.org/cache/epub/40723/pg40723.txt",
+      "title": "The Battle of Life: A Love Story",
+      "author": "Charles Dickens",
+      "language": "English",
+      "raw_sha256": "c6ed236acfcc6a8e63a241a93f93c95e1c5dd5237a39c9b2dcbf2675dc80b957",
+      "body_sha256": "10e8768a4e5644f30f63f7332b4fb831e9717f6b725ef817b4007daba5c8664d"
+    },
+    {
+      "id": "41604",
+      "url": "https://www.gutenberg.org/cache/epub/41604/pg41604.txt",
+      "title": "Miss Santa Claus of the Pullman",
+      "author": "Annie F. Johnston",
+      "language": "English",
+      "raw_sha256": "914806d698c2a550b1c23baec9224efe04b2f67b200e2f4afb40ba15932a8cb8",
+      "body_sha256": "2cf2053cf5f94add3f8df93af0ecbbad70ebc118d4d7131a326943cd3edbc6e7"
+    },
+    {
+      "id": "41831",
+      "url": "https://www.gutenberg.org/cache/epub/41831/pg41831.txt",
+      "title": "Betty Leicester's Christmas",
+      "author": "Sarah Orne Jewett",
+      "language": "English",
+      "raw_sha256": "d93873e55f28e743c50097f5ebeabc191e3e992360bdf67902505a5f49a2f1a8",
+      "body_sha256": "04fe9d5201857da0cb93290193c85407c0bd70b7fa4866d50932249d175afb8a"
+    },
+    {
+      "id": "42079",
+      "url": "https://www.gutenberg.org/cache/epub/42079/pg42079.txt",
+      "title": "Mari, Our Little Norwegian Cousin",
+      "author": "Mary Hazelton Blanchard Wade",
+      "language": "English",
+      "raw_sha256": "67348fc40b825a728c8124ce125ff85e7d325b8bca6575d8f0c1e5481b1624db",
+      "body_sha256": "be15797cad2c3cfc0dfbb78a0b5733102a445ffb17099e24e05a0fbf2ee31861"
+    },
+    {
+      "id": "42919",
+      "url": "https://www.gutenberg.org/cache/epub/42919/pg42919.txt",
+      "title": "Angel Unawares: A Story of Christmas Eve",
+      "author": "C. N. Williamson A. M. Williamson",
+      "language": "English",
+      "raw_sha256": "404d8b306c1b56801694d24c7ea191068a462f2516e752f09d4b55758e2a5cdb",
+      "body_sha256": "142d4f99d9a677be7a040d8166e8a3030a7e7de4925bd0c79553e7ac3e417399"
+    },
+    {
+      "id": "42923",
+      "url": "https://www.gutenberg.org/cache/epub/42923/pg42923.txt",
+      "title": "The Doctor's Christmas Eve",
+      "author": "James Lane Allen",
+      "language": "English",
+      "raw_sha256": "0e5723553c08298fc2e63f1f69bf84b76c0aac8dee11b1c6a9953321577d30eb",
+      "body_sha256": "9fbd34e5072ba894394016cd706a404a03d5d6da1bb9eedd20dca4570275892b"
+    },
+    {
+      "id": "42961",
+      "url": "https://www.gutenberg.org/cache/epub/42961/pg42961.txt",
+      "title": "The House With Sixty Closets: A Christmas Story for Young Folks and Old Children",
+      "author": "Frank Samuel Child",
+      "language": "English",
+      "raw_sha256": "d3c83c95c269ea5d9d8021e9c6e9c3fb0810b43669d49dde1ee4c6227125b068",
+      "body_sha256": "929f2df48b15b65732e824366896326be815c1b540f3278aab3cebbaeeca2b15"
+    },
+    {
+      "id": "43249",
+      "url": "https://www.gutenberg.org/cache/epub/43249/pg43249.txt",
+      "title": "Our Little Canadian Cousin",
+      "author": "Elizabeth Roberts MacDonald",
+      "language": "English",
+      "raw_sha256": "95d3bd934713fd2ad9d6ffb7284ba6fe50ad121c177aae28239f39915f33172d",
+      "body_sha256": "2c45cdf4d7610afbe5c7cbb75e69e1ddcb0b3d60a7bc41860e202e6a0c2bb60b"
+    },
+    {
+      "id": "43426",
+      "url": "https://www.gutenberg.org/cache/epub/43426/pg43426.txt",
+      "title": "Our Little Finnish Cousin",
+      "author": "Clara Vostrovsky Winlow",
+      "language": "English",
+      "raw_sha256": "8f88f474384fcb85e2652b72554fefd0910200aeea2cf59238eab073e714b5d6",
+      "body_sha256": "f341f102faaeb0b6d32a5b3164344842569addc3467aadc36448de1569966f41"
+    },
+    {
+      "id": "43638",
+      "url": "https://www.gutenberg.org/cache/epub/43638/pg43638.txt",
+      "title": "Our Little Swedish Cousin",
+      "author": "Claire Martha Coburn",
+      "language": "English",
+      "raw_sha256": "52be57f302d2861272a7eefe0fd31ba93cbc5a958b031aae4762484ed70e2422",
+      "body_sha256": "c503647b2a66d784f356a2683f85f643e943bf0b3f588e9d463690dd1d41f761"
+    },
+    {
+      "id": "4384",
+      "url": "https://www.gutenberg.org/cache/epub/4384/pg4384.txt",
+      "title": "The Lost Word: A Christmas Legend of Long Ago",
+      "author": "Henry Van Dyke",
+      "language": "English",
+      "raw_sha256": "508615bb550f2580c81f1413a532710417eeb4b73e3243745f1ca3e68dfa8431",
+      "body_sha256": "4076991f0653df2f836658e745443e767d247a1f57c2082736b8f9b00786aad2"
+    },
+    {
+      "id": "44547",
+      "url": "https://www.gutenberg.org/cache/epub/44547/pg44547.txt",
+      "title": "Polly: A Christmas Recollection",
+      "author": "Thomas Nelson Page",
+      "language": "English",
+      "raw_sha256": "e0f21d32cd4d8d29a6868b15bdc260a948cb080aff7a2e474c49e163ead06ad9",
+      "body_sha256": "9d8dfce585574fd0919cdfd9ff2aad88109c802dd8c7609ef4fc82c3152cd93c"
+    },
+    {
+      "id": "44796",
+      "url": "https://www.gutenberg.org/cache/epub/44796/pg44796.txt",
+      "title": "The Prodigal Village: A Christmas Tale",
+      "author": "Irving Bacheller",
+      "language": "English",
+      "raw_sha256": "0ff9dff9ba9d5131a011aad34ef4f7a677ae043ddcf2bab54fcd2a41dcc37d61",
+      "body_sha256": "ab8851820a653033f46c90c81aa2c2bf1efb7f1705f4d085548a82844d69b763"
+    },
+    {
+      "id": "45",
+      "url": "https://www.gutenberg.org/cache/epub/45/pg45.txt",
+      "title": "Anne of Green Gables",
+      "author": "L. M. Montgomery",
+      "language": "English",
+      "raw_sha256": "e80cb784a669cd6b3f71ed663aeb26cf4b2207225686ed8ab3567c52e663eda5",
+      "body_sha256": "be55cf2d8dd0fa7d4681f292e592044c54c0f1ef806ef3e22e0222d453441436"
+    },
+    {
+      "id": "45103",
+      "url": "https://www.gutenberg.org/cache/epub/45103/pg45103.txt",
+      "title": "In the Heart of the Christmas Pines",
+      "author": "Leona Dalrymple",
+      "language": "English",
+      "raw_sha256": "cb23db5f20da2a3e209870c98a856875df123e3ddb4af5699aa75fb299a34a48",
+      "body_sha256": "ced642c651778279f9e1c7ccaba2ea7d8d0aeae0917b75f9394e25f3b3b9a989"
+    },
+    {
+      "id": "45666",
+      "url": "https://www.gutenberg.org/cache/epub/45666/pg45666.txt",
+      "title": "Little Peter: A Christmas Morality for Children of any Age",
+      "author": "Lucas Malet",
+      "language": "English",
+      "raw_sha256": "0f6657fb2c782f5a1618122d5f3fc528570f9c5f2ac0bbb960c751c83f90de7a",
+      "body_sha256": "b1091b0c94d4500191c72eca7ec26d30e784b0cb2c7f2b4fc2397137c97fb1b1"
+    },
+    {
+      "id": "46",
+      "url": "https://www.gutenberg.org/cache/epub/46/pg46.txt",
+      "title": "A Christmas Carol in Prose; Being a Ghost Story of Christmas",
+      "author": "Charles Dickens",
+      "language": "English",
+      "raw_sha256": "8c36b93723d454982df045ec0efdf2664e5a48e6b5e2f670e883575f75ad0cc8",
+      "body_sha256": "3d01ca02298f39b241b59ae72ef0966809373c1b5838f5e3446c5077c3016065"
+    },
+    {
+      "id": "460",
+      "url": "https://www.gutenberg.org/cache/epub/460/pg460.txt",
+      "title": "The Dawn of a To-morrow",
+      "author": "Frances Hodgson Burnett",
+      "language": "English",
+      "raw_sha256": "948de81103031bfac566b605601abf07d6f934718adbdb1e6e7a366e6872a4e3",
+      "body_sha256": "4feae28fd1bcbeca6c9feb4402e20e4c1f137a42bac07ce3fbe5bb1b58a12d4b"
+    },
+    {
+      "id": "479",
+      "url": "https://www.gutenberg.org/cache/epub/479/pg479.txt",
+      "title": "Little Lord Fauntleroy",
+      "author": "Frances Hodgson Burnett",
+      "language": "English",
+      "raw_sha256": "c0cabbd64dfc4ea7db8ed67af06f9d66747118a2a7eeeafa08ef537671a2fcc7",
+      "body_sha256": "7d24772ea5be018ac00abf46d3c4ea9c3a11682018e29d6d59a57834bbb023a5"
+    },
+    {
+      "id": "48325",
+      "url": "https://www.gutenberg.org/cache/epub/48325/pg48325.txt",
+      "title": "Karl Krinken, His Christmas Stocking",
+      "author": "Susan Warner Anna Bartlett Warner",
+      "language": "English",
+      "raw_sha256": "cebebe5e3ba9e2bf6503e556f88f4b0313374b7320bb143caffc29092b6f143b",
+      "body_sha256": "bcea725a95e12c5abebb91ddd990d9b488d0b995d5533b7e99e27df093144136"
+    },
+    {
+      "id": "48951",
+      "url": "https://www.gutenberg.org/cache/epub/48951/pg48951.txt",
+      "title": "Dotty Dimple at School",
+      "author": "Sophie May",
+      "language": "English",
+      "raw_sha256": "a51dd089263d3d436a4f29862d413db389997dd32c7eba77dfcdc33c2eeb5ce8",
+      "body_sha256": "367316d92128fe0dbc7234b9edd3c8722396a20ac8cc41bc2e76c59c9b1ce017"
+    },
+    {
+      "id": "50274",
+      "url": "https://www.gutenberg.org/cache/epub/50274/pg50274.txt",
+      "title": "The Little House",
+      "author": "Coningsby Dawson",
+      "language": "English",
+      "raw_sha256": "2fac97b6b9cbd50a9d213d9a3fb6f28ffb365629bdfe8f133651cf3b440c4852",
+      "body_sha256": "bc5c81b1200d16a7d01448495926d1223bcde6226d2bbd255f0bd08aff336119"
+    },
+    {
+      "id": "514",
+      "url": "https://www.gutenberg.org/cache/epub/514/pg514.txt",
+      "title": "Little Women",
+      "author": "Louisa May Alcott",
+      "language": "English",
+      "raw_sha256": "36831477b339dbcd7e7206119d77e9e58b9727ef3c299d1a1dc4446e1db97850",
+      "body_sha256": "518e528fb16e587b5bb5f875eb577f908071e0a6271c7430c992f235cb62298f"
+    },
+    {
+      "id": "5141",
+      "url": "https://www.gutenberg.org/cache/epub/5141/pg5141.txt",
+      "title": "What Katy Did at School",
+      "author": "Susan Coolidge",
+      "language": "English",
+      "raw_sha256": "23f5faa051f3c3f5fdc5dcdcfaf047bf06a45c83fae527659e466cac75a917bf",
+      "body_sha256": "9b36078d1192e3c75f723be0560985d6d029498d4ace190634eb4bd91cc9974a"
+    },
+    {
+      "id": "519",
+      "url": "https://www.gutenberg.org/cache/epub/519/pg519.txt",
+      "title": "A Kidnapped Santa Claus",
+      "author": "L. Frank Baum",
+      "language": "English",
+      "raw_sha256": "1f5a1e55c2f16c28d2c3ab9afbe858208e3899866edb216d986c9b4402f8f3de",
+      "body_sha256": "2aa2f2b9fcd73a9ac5f06ea14334b15e9360bd2a1244c995477c55e946f730be"
+    },
+    {
+      "id": "51942",
+      "url": "https://www.gutenberg.org/cache/epub/51942/pg51942.txt",
+      "title": "The Three Godfathers",
+      "author": "Peter B. Kyne",
+      "language": "English",
+      "raw_sha256": "122ac6befc27aa6f66d1bce28c0e14bf9ef12bb40a6802852b97af82ff10b3a7",
+      "body_sha256": "dd7b9efd1b42aaeb2f517645fe133855c23129a1a06967a534594705efd80430"
+    },
+    {
+      "id": "520",
+      "url": "https://www.gutenberg.org/cache/epub/520/pg520.txt",
+      "title": "The Life and Adventures of Santa Claus",
+      "author": "L. Frank Baum",
+      "language": "English",
+      "raw_sha256": "8e33fdafbae73db5586e4bb6ec40a082a0b33b744aed99bbd79cafab9935f677",
+      "body_sha256": "f1f97873d96ab1316e731e334c0fa4e5c43a266f6814117606e4726c1674760c"
+    },
+    {
+      "id": "52935",
+      "url": "https://www.gutenberg.org/cache/epub/52935/pg52935.txt",
+      "title": "Mr. Blake's Walking-Stick: A Christmas Story for Boys and Girls",
+      "author": "Edward Eggleston",
+      "language": "English",
+      "raw_sha256": "ef508f33948d2bb89a074acb7c6bc7d47f158f6cc8d482cf0bc6b48eb5318b46",
+      "body_sha256": "738527ad0fc1894852e64cf05ef0e4f90f2fe7b7539353b48c5942d713a9f2da"
+    },
+    {
+      "id": "5303",
+      "url": "https://www.gutenberg.org/cache/epub/5303/pg5303.txt",
+      "title": "The Little Hunchback Zia",
+      "author": "Frances Hodgson Burnett",
+      "language": "English",
+      "raw_sha256": "424c4199720d14786b443be5208d3d36dd77b79919cf7234b59b9352f3020733",
+      "body_sha256": "a02f16d3b99325d3837a79bdbccbb6055e52fd7853e81a631213cf6c32803305"
+    },
+    {
+      "id": "53402",
+      "url": "https://www.gutenberg.org/cache/epub/53402/pg53402.txt",
+      "title": "Brotherly House",
+      "author": "Unknown",
+      "language": "English",
+      "raw_sha256": "4a840cd31709d517c60fd81a683ea199879cf6451dd5cf3cf6f868d62e56d910",
+      "body_sha256": "414a0573135b16a526f09df1ce1c858cf6632acf88a9450f98eed558f02f0a69"
+    },
+    {
+      "id": "5347",
+      "url": "https://www.gutenberg.org/cache/epub/5347/pg5347.txt",
+      "title": "Understood Betsy",
+      "author": "Dorothy Canfield Fisher",
+      "language": "English",
+      "raw_sha256": "98cc2411a61f892c079d7d3e47335d586d6690fd6ac574ce6a025253b90537cf",
+      "body_sha256": "5d9c41f2de6a3df1217daeae04c2afad64de9d61e337747a773c56c98e095742"
+    },
+    {
+      "id": "53920",
+      "url": "https://www.gutenberg.org/cache/epub/53920/pg53920.txt",
+      "title": "Kittyboy's Christmas",
+      "author": "Amy Ella Blanchard",
+      "language": "English",
+      "raw_sha256": "57cb9fe8837fe12f07f20a489d02b1e748b7b66f9b927d722a8177627b436808",
+      "body_sha256": "cee20a56b1850352cea1f245367a16436b2106e8f2e464e4f0a5f83daf4e1d13"
+    },
+    {
+      "id": "544",
+      "url": "https://www.gutenberg.org/cache/epub/544/pg544.txt",
+      "title": "Anne's House of Dreams",
+      "author": "L. M. Montgomery",
+      "language": "English",
+      "raw_sha256": "8aa702622f8f47ccc90302c5519aa3f9acdbc1b1b910162e38630e8e0f0b2fee",
+      "body_sha256": "3944804c0c7a9105aa9e65121c163ea3615c99cf3e73a68008334343ddc8aca2"
+    },
+    {
+      "id": "55143",
+      "url": "https://www.gutenberg.org/cache/epub/55143/pg55143.txt",
+      "title": "The Story of the Mince Pie",
+      "author": "Josephine Scribner Gates",
+      "language": "English",
+      "raw_sha256": "8911f5b1a6c156f98fd753f4527695802cff02de501fb10e6f081b4483680683",
+      "body_sha256": "9cbda5c03e67a541215f91137cae186e889e6794d94940910fa47ff66e1592e5"
+    },
+    {
+      "id": "55281",
+      "url": "https://www.gutenberg.org/cache/epub/55281/pg55281.txt",
+      "title": "The Christmas Dream of Little Charles",
+      "author": "Unknown",
+      "language": "English",
+      "raw_sha256": "c9fec57c76b784db0eb10eac3eeb5ea76225a6ceb635410d000c226ee4e510ba",
+      "body_sha256": "3a10c6348b780155ce0ccb94c35945988ae0b115d4871a0b3889b7d838268f02"
+    },
+    {
+      "id": "5591",
+      "url": "https://www.gutenberg.org/cache/epub/5591/pg5591.txt",
+      "title": "The Nuts: A Christmas Story for my Children and Grandchildren",
+      "author": "Georg Ebers",
+      "language": "English",
+      "raw_sha256": "cb71059f4ff6593c1338190cd09c4a3b2dc51d1a9a432d2701259a92c51fbf73",
+      "body_sha256": "52ce5438c43ca4e99246d94415b892b7561d57e575a37351dc63926d45425517"
+    },
+    {
+      "id": "5632",
+      "url": "https://www.gutenberg.org/cache/epub/5632/pg5632.txt",
+      "title": "Five Little Peppers Midway",
+      "author": "Margaret Sidney",
+      "language": "English",
+      "raw_sha256": "8d622925dd87f797ef78f22a2de4da4c80ef550a3a1ef095ad15a52cefb5de0a",
+      "body_sha256": "58a71e2123adc378206a218c87ae6e0d0279a42dbf6527967bca75e247b176ad"
+    },
+    {
+      "id": "56410",
+      "url": "https://www.gutenberg.org/cache/epub/56410/pg56410.txt",
+      "title": "Ruby: A Story of the Australian Bush",
+      "author": "Molly E. Jamieson",
+      "language": "English",
+      "raw_sha256": "65916f13d26dbae0280214338ea85b023e10dccc09da3e8c4abec71c22beaac7",
+      "body_sha256": "e90a92b1efa7086de1f2860733dfbd58180c497782b8e0489f98084c1f66289e"
+    },
+    {
+      "id": "56583",
+      "url": "https://www.gutenberg.org/cache/epub/56583/pg56583.txt",
+      "title": "Patty in the City",
+      "author": "Carolyn Wells",
+      "language": "English",
+      "raw_sha256": "dbb59c5e58b4cca7f59250e9c8dd62fa4467460dd68b657fc845b9944356a504",
+      "body_sha256": "b4a903ac6ceea61f105efb9a2e4bcb53b93e3cb31401703c78f8c0fb32663c8a"
+    },
+    {
+      "id": "56599",
+      "url": "https://www.gutenberg.org/cache/epub/56599/pg56599.txt",
+      "title": "The Fortunes of the Colville Family; or, A Cloud with its Silver Lining",
+      "author": "Frank E. Smedley",
+      "language": "English",
+      "raw_sha256": "524bf9b10eca80956466fcd157818831994b275917b964cf094d225c7dd90858",
+      "body_sha256": "349eee2a3edd25827e06bf532f1b5ec40329ecf1645122142da7caf221a38a3f"
+    },
+    {
+      "id": "57309",
+      "url": "https://www.gutenberg.org/cache/epub/57309/pg57309.txt",
+      "title": "Aunt Jo's scrap-bag, Volume 3 Cupid and Chow-chow, etc.",
+      "author": "Louisa May Alcott",
+      "language": "English",
+      "raw_sha256": "c53df374b0b070aef8183aa15b37b1720dc2d3b232cf591f02defd84b3d62864",
+      "body_sha256": "7d1ba2c74f5bd23b06b77c7d4d62eeb7e754449023f61e3fe05845b53c9cd825"
+    },
+    {
+      "id": "57413",
+      "url": "https://www.gutenberg.org/cache/epub/57413/pg57413.txt",
+      "title": "Down the Snow Stairs; Or, From Good-Night to Good-Morning",
+      "author": "Alice Corkran",
+      "language": "English",
+      "raw_sha256": "a822065c17416aa9f317ede033363323083748351ddebb9638a03d48e270f67a",
+      "body_sha256": "a1a0bbeaaa0ddfeb7c75e9fb8fba51989562af8122730668934c0a6b9639543a"
+    },
+    {
+      "id": "58558",
+      "url": "https://www.gutenberg.org/cache/epub/58558/pg58558.txt",
+      "title": "Christmas at Thompson Hall",
+      "author": "Anthony Trollope",
+      "language": "English",
+      "raw_sha256": "1a444438f04c7af2cf841ecf4fb4505cf1d5018a6e48743747200a9dc3452f4e",
+      "body_sha256": "08a178a7e797e3f44c24817ec54b8e07ef6fbf60b0b96210fe75f5b7205ae061"
+    },
+    {
+      "id": "58762",
+      "url": "https://www.gutenberg.org/cache/epub/58762/pg58762.txt",
+      "title": "The New-Year's Bargain",
+      "author": "Susan Coolidge",
+      "language": "English",
+      "raw_sha256": "e8a0103091e40d389c0f539b134dd40f294d05d89e80a0f5a24d73ea68578475",
+      "body_sha256": "8264bd008eed81bed1471dba8abed18dbfda2ae6ed6817bde2e68a7905678b3c"
+    },
+    {
+      "id": "5949",
+      "url": "https://www.gutenberg.org/cache/epub/5949/pg5949.txt",
+      "title": "Beasley's Christmas Party",
+      "author": "Booth Tarkington",
+      "language": "English",
+      "raw_sha256": "72ed25371fce9c8ff9211ca18ff8ff84a0f7f7137fbb050d90755e0cd419d484",
+      "body_sha256": "a7032641685ecdfbabce7aa0cc43e1bf2a369b3cd1bc1733803f3f956b5de9bd"
+    },
+    {
+      "id": "59594",
+      "url": "https://www.gutenberg.org/cache/epub/59594/pg59594.txt",
+      "title": "Betty's Virginia Christmas",
+      "author": "Molly Elliot Seawell",
+      "language": "English",
+      "raw_sha256": "245d393a4719c70f51bb471bdbc643bd20dcb4a4713a0f8df1b74fca18deb086",
+      "body_sha256": "73a67f1858d23a5e80f14fe85c5849429227ded589ec2433abe6621fed6483fa"
+    },
+    {
+      "id": "5963",
+      "url": "https://www.gutenberg.org/cache/epub/5963/pg5963.txt",
+      "title": "Mr. Bingle",
+      "author": "George Barr McCutcheon",
+      "language": "English",
+      "raw_sha256": "32d3dd9cc77ed14eced3d14ab065828ea67c60f5481468f3e37ec120304f0b6d",
+      "body_sha256": "fd6b21fdcab5dca4966362b0b063a9c1d20c88a715ba030dfef9c8cb50ea81ea"
+    },
+    {
+      "id": "6055",
+      "url": "https://www.gutenberg.org/cache/epub/6055/pg6055.txt",
+      "title": "The Bobbsey Twins at Snow Lodge",
+      "author": "Laura Lee Hope",
+      "language": "English",
+      "raw_sha256": "e729c1886ce8835e46af565954c36ba2dd35fe09ea9755f672487278ea03bbe6",
+      "body_sha256": "b002720033399a62a6be7382afd60b50759886dd959ca1663c77d282c640919b"
+    },
+    {
+      "id": "61193",
+      "url": "https://www.gutenberg.org/cache/epub/61193/pg61193.txt",
+      "title": "Mr. Pickwick's Christmas",
+      "author": "Charles Dickens",
+      "language": "English",
+      "raw_sha256": "1fc3a861b30ffd2d3cd503512aa972abad3ba4d007b36ba0ed50d39792f17d6d",
+      "body_sha256": "fffd8ce4489df0f423a0b4e4d83d4a7b4d275975d91e03d8789352d298793aa8"
+    },
+    {
+      "id": "64094",
+      "url": "https://www.gutenberg.org/cache/epub/64094/pg64094.txt",
+      "title": "Christmas on Wheels",
+      "author": "Willis Boyd Allen",
+      "language": "English",
+      "raw_sha256": "aa75424416f2bb58d04f38b47417d88181556cc051c8fad463dd9b9426dad7ec",
+      "body_sha256": "bc9acba7cab8e64f53ce7a3db4801db9485af37ee452ac01a6f8209548a9898b"
+    },
+    {
+      "id": "64103",
+      "url": "https://www.gutenberg.org/cache/epub/64103/pg64103.txt",
+      "title": "Little Paulina: Christmas in Russia",
+      "author": "Mary Cowden Clarke",
+      "language": "English",
+      "raw_sha256": "201fe62574107201a210424b4f9c3215dd5378771984af9f5bd54b96750c6120",
+      "body_sha256": "bc37ff24c490247edf4e648019f843f9ba2b8f4afad20b604a04766c3effcf50"
+    },
+    {
+      "id": "64107",
+      "url": "https://www.gutenberg.org/cache/epub/64107/pg64107.txt",
+      "title": "Christmas in Sweden; or, A festival of light",
+      "author": "Sarah Gertrude Pomeroy",
+      "language": "English",
+      "raw_sha256": "25e4eeedb72ced7ec29ac16abcc5f801d1d3d90d72caa6dad19cd275310c6508",
+      "body_sha256": "9c60cd6b50d219a376fee4311aae056b9225a7d12e9c35ab31fdb5004f08502a"
+    },
+    {
+      "id": "64117",
+      "url": "https://www.gutenberg.org/cache/epub/64117/pg64117.txt",
+      "title": "The Christmas Holly",
+      "author": "Marion Harland",
+      "language": "English",
+      "raw_sha256": "1be480cf8dbab86da9c61c93d930b91e897c59761d50a1c50d58eeb1d87e030d",
+      "body_sha256": "bc8000972ebdd03a516996eb4470d4ca22cafb6bbb1c4ab01909881d12af1867"
+    },
+    {
+      "id": "64124",
+      "url": "https://www.gutenberg.org/cache/epub/64124/pg64124.txt",
+      "title": "Santa Claus' Sweetheart",
+      "author": "Imogen Clark",
+      "language": "English",
+      "raw_sha256": "1b2bd57ce88ab9985bd31c6f6d5c9bcb55f0d2e55f9fc7de8b28f361e5f59abd",
+      "body_sha256": "047a618ef62fe0df925e67ee251af33ac05bfa21611c54ad4ab1e33daea2fc15"
+    },
+    {
+      "id": "64152",
+      "url": "https://www.gutenberg.org/cache/epub/64152/pg64152.txt",
+      "title": "The Strange Visitation",
+      "author": "Marie Corelli",
+      "language": "English",
+      "raw_sha256": "f3700af851bbfdcbffb2476e0b0e0d378ba71bfc018cb3d921ed073d61f46148",
+      "body_sha256": "e8ceb51a72acdd9e3af0c96df37fad7fde96a5dad94103a96af048117590b778"
+    },
+    {
+      "id": "644",
+      "url": "https://www.gutenberg.org/cache/epub/644/pg644.txt",
+      "title": "The Haunted Man and the Ghost's Bargain",
+      "author": "Charles Dickens",
+      "language": "English",
+      "raw_sha256": "e4b19736418521d7837bfc3f753814e686dd15690fe00c8dd8185c10d49456bd",
+      "body_sha256": "d148dd50d454c2b7962b9f3a96e5554ac20406517412d6cb37fbabd79b3ddaac"
+    },
+    {
+      "id": "653",
+      "url": "https://www.gutenberg.org/cache/epub/653/pg653.txt",
+      "title": "The Chimes",
+      "author": "Charles Dickens",
+      "language": "English",
+      "raw_sha256": "5132d5c1a5f6acc3aa34d44a375690d9362a9cf98e129939a7999e88edd34236",
+      "body_sha256": "2c3b1d6e6e420e103b242903c80c3eea1db670059ea726b446416899c585542c"
+    },
+    {
+      "id": "67034",
+      "url": "https://www.gutenberg.org/cache/epub/67034/pg67034.txt",
+      "title": "The Child and the Dream: A Christmas Story",
+      "author": "Marion Cook Stow",
+      "language": "English",
+      "raw_sha256": "b465b8b14f464936055cc9801a81c52d445ee72697352a842dce3772976b26a1",
+      "body_sha256": "a9653ca97339ed810cf2956360add38ff17f32ea1c29fb58fd69f0e75b542eb3"
+    },
+    {
+      "id": "67105",
+      "url": "https://www.gutenberg.org/cache/epub/67105/pg67105.txt",
+      "title": "The Animals' Christmas Tree",
+      "author": "John P. Peters",
+      "language": "English",
+      "raw_sha256": "1bbc3c4fb57aadfa720baa82c141fc9e8da4cfd45b1f92577f546a239c93290e",
+      "body_sha256": "017a0b3f99e7840f463a3726cdc239fb410096e42adaec136b274edefd05dce5"
+    },
+    {
+      "id": "67194",
+      "url": "https://www.gutenberg.org/cache/epub/67194/pg67194.txt",
+      "title": "Christmas Holidays; or, a Visit at Home",
+      "author": "Anonymous",
+      "language": "English",
+      "raw_sha256": "abad7d8a49f5d63c8db33dce8ad9d6a26a2a6062bc18dbfaf12f3fb6155a7187",
+      "body_sha256": "f1fe85de981126969282897ece3c67c5dcbc46f3db63dff16a8a117814dcbc01"
+    },
+    {
+      "id": "67255",
+      "url": "https://www.gutenberg.org/cache/epub/67255/pg67255.txt",
+      "title": "The Story of Zephyr: A Christmas Story",
+      "author": "Jeanie Oliver Davidson Smith",
+      "language": "English",
+      "raw_sha256": "d643011c8dbcf3a297c1c9eda782378d62e1cba86a4bdca4326e7a201dc52d27",
+      "body_sha256": "2ef81ac8a5172911f54c82f8266469077f82dc7ec8028dae3da16476dbfcccdc"
+    },
+    {
+      "id": "678",
+      "url": "https://www.gutenberg.org/cache/epub/678/pg678.txt",
+      "title": "The Cricket on the Hearth: A Fairy Tale of Home",
+      "author": "Charles Dickens",
+      "language": "English",
+      "raw_sha256": "bc7686dc0633b140425ef429ef5567633063889467b2f535bdb3bb06fc4fa4ce",
+      "body_sha256": "dc6644420ec9c2fca7f6d130ea05469d5fe6de306e5aaed88c828b3cf9ce29e0"
+    },
+    {
+      "id": "68424",
+      "url": "https://www.gutenberg.org/cache/epub/68424/pg68424.txt",
+      "title": "Magic words: A tale for Christmas time",
+      "author": "Emilie Maceroni",
+      "language": "English",
+      "raw_sha256": "d12cb98fc01c5c07f0bced6a75f6b55703b9b3b7f5ef97a9570bf30d1b25bbae",
+      "body_sha256": "a46b013ce5fb8ff7bb657937cf791d85126ce2198f4150a167f4d6b3067af660"
+    },
+    {
+      "id": "68590",
+      "url": "https://www.gutenberg.org/cache/epub/68590/pg68590.txt",
+      "title": "The Christmas Bishop",
+      "author": "Winifred Margaretta Kirkland",
+      "language": "English",
+      "raw_sha256": "f5e858e793880ee55347ec8bdc105d08ea42bfaabe922d935a188830d886e51b",
+      "body_sha256": "eb9017236ee7bf986967d35101c079491acb4616f136a1ac5d46093649111b57"
+    },
+    {
+      "id": "69068",
+      "url": "https://www.gutenberg.org/cache/epub/69068/pg69068.txt",
+      "title": "The country Christmas",
+      "author": "Frances Margaret Fox",
+      "language": "English",
+      "raw_sha256": "18d6da03768d6f3bd1609731bc8e243995ff4bd8a10961e52259c4d2e15c591a",
+      "body_sha256": "d80b64f0bd86c4615ab595098b4f2b4e3b1bf73b249cb84db13deb6839973800"
+    },
+    {
+      "id": "69097",
+      "url": "https://www.gutenberg.org/cache/epub/69097/pg69097.txt",
+      "title": "Christmas in Austria; or, Fritzl's friends",
+      "author": "Frances Bartlett",
+      "language": "English",
+      "raw_sha256": "0221d1cd9aaaf29f70d0aa7721eefb12ce060243db589370c87a50b9656bf6f9",
+      "body_sha256": "c5a60a96d670aee93151ce14bfb8abca43aceace1608db14771130687c2799fb"
+    },
+    {
+      "id": "69601",
+      "url": "https://www.gutenberg.org/cache/epub/69601/pg69601.txt",
+      "title": "The escape of Alice: A Christmas fantasy",
+      "author": "Vincent Starrett",
+      "language": "English",
+      "raw_sha256": "afab450e77a5f0acbdcfca34da6d3648910dbf18700632e8b3d30b94d5f498c7",
+      "body_sha256": "9abc499c5146c4e9d00b424303fb343b378183edbc51c058d3358700a73566ba"
+    },
+    {
+      "id": "69685",
+      "url": "https://www.gutenberg.org/cache/epub/69685/pg69685.txt",
+      "title": "Just sweethearts: A Christmas love story",
+      "author": "Harry Stillwell Edwards",
+      "language": "English",
+      "raw_sha256": "96bde357b6883fdde8faa6adc9e76fb87b9dd19a94c5bfebd7d74847d1652ab1",
+      "body_sha256": "53d9842802d4199c4c31af82cc359d0847d5af1ff85ade9609ee9251a85a1077"
+    },
+    {
+      "id": "69782",
+      "url": "https://www.gutenberg.org/cache/epub/69782/pg69782.txt",
+      "title": "A Southern Cross fairy tale",
+      "author": "Kate McCosh Clark",
+      "language": "English",
+      "raw_sha256": "1f044fffc47d05c0f9c29de5c055f942dde109b22fb2e87eee47c4bbaec91979",
+      "body_sha256": "9958de651640d2e84c9dfc2423814b7366b21b38510dc206e73e2cca25f10dd5"
+    },
+    {
+      "id": "69854",
+      "url": "https://www.gutenberg.org/cache/epub/69854/pg69854.txt",
+      "title": "The Christmas Makers' Club",
+      "author": "Edith A. Sawyer",
+      "language": "English",
+      "raw_sha256": "3c19826e4612c326827c8cfa8d49dbd8d84b08876f8eef3266f909d7ff27514f",
+      "body_sha256": "d7154c9ca5281dcab1129a6ac6625a4c03c763798d9d92347b78be0af920b786"
+    },
+    {
+      "id": "70097",
+      "url": "https://www.gutenberg.org/cache/epub/70097/pg70097.txt",
+      "title": "A new note in the Christmas Carol",
+      "author": "Clara Wood Mingins",
+      "language": "English",
+      "raw_sha256": "ba8832e8d0da309e046558996ee5682455dc18a655b1f5dfa2045268a3e737da",
+      "body_sha256": "dc0521ec75355314faac78c9d666ad440cc5b562463b47850c7d869999805819"
+    },
+    {
+      "id": "70198",
+      "url": "https://www.gutenberg.org/cache/epub/70198/pg70198.txt",
+      "title": "Seven Xmas Eves Being the romance of a social evolution",
+      "author": "Unknown",
+      "language": "English",
+      "raw_sha256": "8a2163d8abfe798cfc9a4368635eb52a6a1d3d0de3ee6e5cd89992bbe950b35a",
+      "body_sha256": "1d424625e533eb56b53d8acfbcf43c3eaaa5c7e150ca27ade46c80a22d9abc9a"
+    },
+    {
+      "id": "70273",
+      "url": "https://www.gutenberg.org/cache/epub/70273/pg70273.txt",
+      "title": "The boy who brought Christmas",
+      "author": "Alice Morgan",
+      "language": "English",
+      "raw_sha256": "22bc536daf4cf2531ebdcb4236782ceef94f87f14573619aa070c12c7282528d",
+      "body_sha256": "82024330a39a40d588db5b31c97eabd9901f18decd9d1d101959416c7c2f1781"
+    },
+    {
+      "id": "70279",
+      "url": "https://www.gutenberg.org/cache/epub/70279/pg70279.txt",
+      "title": "Bertha Weisser's wish A Christmas story",
+      "author": "Mary L. Bissell",
+      "language": "English",
+      "raw_sha256": "cbc328c3842f20caf9527ad9d7483157fc07ffc6575d5c856b86b62e27da7cb1",
+      "body_sha256": "37afb5ea8e0fa207c9ca0e48a1bfdfc8a57ebbc93d14920be6d86c0154bbacad"
+    },
+    {
+      "id": "70294",
+      "url": "https://www.gutenberg.org/cache/epub/70294/pg70294.txt",
+      "title": "The First Church's Christmas barrel",
+      "author": "Caroline Abbot Stanley",
+      "language": "English",
+      "raw_sha256": "6570731b654fb985b56d382c59108f044dcc3c9ceece5b6a5d6b8c26300e080d",
+      "body_sha256": "04f0a400cba7ef3b0f3d27b8838d9b7e9dd8c401d10dba84a646ee261b280e96"
+    },
+    {
+      "id": "704",
+      "url": "https://www.gutenberg.org/cache/epub/704/pg704.txt",
+      "title": "The Mansion",
+      "author": "Henry Van Dyke",
+      "language": "English",
+      "raw_sha256": "94135d7971404bc968799a2a158f5094d2f4967241193d2a306d4bf7c798e2c9",
+      "body_sha256": "20d85e03a9bc9bb243596f71cf5f414081ee94671cdf191c42a7892ac457ae5e"
+    },
+    {
+      "id": "70521",
+      "url": "https://www.gutenberg.org/cache/epub/70521/pg70521.txt",
+      "title": "The hermit's Christmas",
+      "author": "David De Forest Burrell",
+      "language": "English",
+      "raw_sha256": "1ad9cb19b7c0d8cdb07fa231dfbd4c7c37ffe1fedb7a4cbaadcfaad73316c362",
+      "body_sha256": "2b8d084de696889b2ec9928b5705d4c619750e1101dfe10514dc933fd8b3b1ae"
+    },
+    {
+      "id": "71029",
+      "url": "https://www.gutenberg.org/cache/epub/71029/pg71029.txt",
+      "title": "Jasper's old shed, and how the light shone in",
+      "author": "A. M. Coker",
+      "language": "English",
+      "raw_sha256": "5cf9df301f496507d759142fcd11e6b194fd574aa527b317cc9c4891240c9618",
+      "body_sha256": "d23c37abbd2eb93403a84dabbcec2ac902aa51034ad6387ccd507991d5604691"
+    },
+    {
+      "id": "71547",
+      "url": "https://www.gutenberg.org/cache/epub/71547/pg71547.txt",
+      "title": "A journey in search of Christmas",
+      "author": "Owen Wister",
+      "language": "English",
+      "raw_sha256": "66ece42c81b1a4064eab3729202075c97543ef5978b8bbc709662fb6def23aee",
+      "body_sha256": "867074a05113aa3fe41ae4d81ccc36da0bf1400689c828a0cd58e4e7ebcea6b7"
+    },
+    {
+      "id": "71759",
+      "url": "https://www.gutenberg.org/cache/epub/71759/pg71759.txt",
+      "title": "Granfer, and One Christmas time",
+      "author": "Eleanora H. Stooke",
+      "language": "English",
+      "raw_sha256": "ec7da7337762e629dc65bb1b42a32378dbe8d648c5f767b40666589bf8d66409",
+      "body_sha256": "9cf750299e94b8db4be352f496d2a0e569651c324570a3c18be765b3c3349561"
+    },
+    {
+      "id": "721",
+      "url": "https://www.gutenberg.org/cache/epub/721/pg721.txt",
+      "title": "The Birds' Christmas Carol",
+      "author": "Kate Douglas Smith Wiggin",
+      "language": "English",
+      "raw_sha256": "c601303a57c13d005af336add638eca14c0a7c9fa854f725ea78b4cabfbb2fa8",
+      "body_sha256": "339829a13bab67ebac036d931a4ff0cd59c1fa1ae8990d3558c63cbf9e0dc9e4"
+    },
+    {
+      "id": "72453",
+      "url": "https://www.gutenberg.org/cache/epub/72453/pg72453.txt",
+      "title": "The Squire's young folk A Christmas story",
+      "author": "Eleanora H. Stooke",
+      "language": "English",
+      "raw_sha256": "885726d11214edfd4a91c0f02782ee207e3f0badafb4402fff26b8018e3c1f36",
+      "body_sha256": "c1dca9bbfc15882e05cad55374a9183bed1e61f4e20f9faecce87ef51ac33585"
+    },
+    {
+      "id": "72586",
+      "url": "https://www.gutenberg.org/cache/epub/72586/pg72586.txt",
+      "title": "Ginevra or, The old oak chest, a Christmas story",
+      "author": "Susan E. Wallace",
+      "language": "English",
+      "raw_sha256": "e536150ee26693e5152a722613148b6e175929b98f82fb004a864b749f56bd97",
+      "body_sha256": "32a4ecd5431fd665cc1da30913c3bc2fac4974e64c9cfd5a1c4572938149d456"
+    },
+    {
+      "id": "72610",
+      "url": "https://www.gutenberg.org/cache/epub/72610/pg72610.txt",
+      "title": "The Christmas gift A story for little folks",
+      "author": "Oliver Optic",
+      "language": "English",
+      "raw_sha256": "1236e0e0c87b87c7df81cb7ea8bbb99861674f04d31b8581446d5a20a8d9b9ee",
+      "body_sha256": "d28fc0053642b98daec06496a350bef69f3164f1bdcb05b61fc93737b5678b6e"
+    },
+    {
+      "id": "72621",
+      "url": "https://www.gutenberg.org/cache/epub/72621/pg72621.txt",
+      "title": "Our Christmas party",
+      "author": "Edwin Hodder",
+      "language": "English",
+      "raw_sha256": "b51bb4af0610c15f25dfa7718f675683e0e3593d31f13efa60baeed42f97f577",
+      "body_sha256": "6a2d68af81d108c18759352b2aefd11354981e4511237b4a33289f705e97b081"
+    },
+    {
+      "id": "74537",
+      "url": "https://www.gutenberg.org/cache/epub/74537/pg74537.txt",
+      "title": "The wonderful Christmas in Pumpkin Delight Lane",
+      "author": "Sarah J. Prichard",
+      "language": "English",
+      "raw_sha256": "c2c547be0349eb3556e454fa8294b1bbfc95f6b01292eec3e50eae65ab47857b",
+      "body_sha256": "7cf546b0aa6efaa4b7a9f71e28d815632f390fc292953ddab077dd862acd5e19"
+    },
+    {
+      "id": "74849",
+      "url": "https://www.gutenberg.org/cache/epub/74849/pg74849.txt",
+      "title": "The Christmas earnings Or, Ethel Fletcher's temptation",
+      "author": "Lucy Ellen Guernsey",
+      "language": "English",
+      "raw_sha256": "c74955d8b1fcacc2543169ae00bf27d1543aecc34bd076bc8ca998b2e955178e",
+      "body_sha256": "00d1b3ecd7588f51c3c4dedc67ca6cc91155d8b999a32f1ac686a26b235b6807"
+    },
+    {
+      "id": "74860",
+      "url": "https://www.gutenberg.org/cache/epub/74860/pg74860.txt",
+      "title": "Elsie a Christmas story",
+      "author": "Alexander Lange Kielland",
+      "language": "English",
+      "raw_sha256": "b9e5e9fb5ae77823dc9a78cc797575b6009a7eae6ae5dfe556087a3466957b91",
+      "body_sha256": "03fda3ff2e2df6366073c9bfabcfcd1cf4b073f8d2fc874dca424910183be054"
+    },
+    {
+      "id": "75031",
+      "url": "https://www.gutenberg.org/cache/epub/75031/pg75031.txt",
+      "title": "Corrie",
+      "author": "active approximately 1876-1880 Ruth Lynn",
+      "language": "English",
+      "raw_sha256": "f8a54bf4f27b20ad9d65c3dc57e77caa732e27df6f766792d67f67dc427f70ff",
+      "body_sha256": "6ee2b2d2f78e13f8f0178da29a4b8074d67944e7490f4784b7b2de0323ce5120"
+    },
+    {
+      "id": "75482",
+      "url": "https://www.gutenberg.org/cache/epub/75482/pg75482.txt",
+      "title": "Maisie's merry Christmas",
+      "author": "Nina Rhoades",
+      "language": "English",
+      "raw_sha256": "c87c4a7d36cbfad741122721de4ce0747bae58d4026178104c2a026ca4962921",
+      "body_sha256": "986e6720ba37d75a30df229ace53b07d992b48693cfff34069e12a4ee189cae4"
+    },
+    {
+      "id": "75689",
+      "url": "https://www.gutenberg.org/cache/epub/75689/pg75689.txt",
+      "title": "Beth's wonder-winter A story",
+      "author": "Marion Ames Taggart",
+      "language": "English",
+      "raw_sha256": "c3a5bd475fb66fd6d77129503307ff7b85de66c8db9bf56a02617232f1fcac16",
+      "body_sha256": "ffe388513465b191c0b743cc7244eb9160838680496ded5125bd473df09eca8e"
+    },
+    {
+      "id": "76681",
+      "url": "https://www.gutenberg.org/cache/epub/76681/pg76681.txt",
+      "title": "Liliecrona's home",
+      "author": "Selma Lagerlöf",
+      "language": "English",
+      "raw_sha256": "e17fc3e0aedc6c09babd9198649ebd8d001286c5b58f16da4a97df0f8ef63387",
+      "body_sha256": "c70621d6d18632b7911fdda85804ce640b0b17ac9b4ca7f68ec63c82a39102b0"
+    },
+    {
+      "id": "77220",
+      "url": "https://www.gutenberg.org/cache/epub/77220/pg77220.txt",
+      "title": "Tabby's travels or the holiday adventures of a kitten",
+      "author": "Lucy Ellen Guernsey",
+      "language": "English",
+      "raw_sha256": "cae5223d376b3a73e2732de0bea386ca4fbb0234fd1805e5bcc251fb7b56269d",
+      "body_sha256": "9cd676d0abcc9955b2a38eb22c865269ccfafe335630b6db2908af62cfce4590"
+    },
+    {
+      "id": "78374",
+      "url": "https://www.gutenberg.org/cache/epub/78374/pg78374.txt",
+      "title": "Little Merry Christmas",
+      "author": "Winifred Arnold",
+      "language": "English",
+      "raw_sha256": "a2ee9a053f3c5bda5e455610ba003b095f25aac84090e6f4ebcef421b0651b9b",
+      "body_sha256": "d80df051b9d695ec070c3d4f939ae7a34b03f5e46fa917b0d170b5c2b82c44ee"
+    },
+    {
+      "id": "79517",
+      "url": "https://www.gutenberg.org/cache/epub/79517/pg79517.txt",
+      "title": "Christie's Christmas",
+      "author": "Pansy Alden",
+      "language": "English",
+      "raw_sha256": "772c0dbf9ac76cdf527ee0047d8ed4ffe649eea05c27ddae4135530009ba8572",
+      "body_sha256": "dd83817ab792be76b5a32cc3b44face5ea36e0bbce5c436089ffaaef5cd2e12e"
+    },
+    {
+      "id": "809",
+      "url": "https://www.gutenberg.org/cache/epub/809/pg809.txt",
+      "title": "Holiday Romance",
+      "author": "Charles Dickens",
+      "language": "English",
+      "raw_sha256": "50311a9ccebe1564caff44622266f8e2f74006f5f332819a0595849f23be1c0d",
+      "body_sha256": "956b1eb3a33dcf6d7238da7a8b0026954b78b870ceb0de373ca8a25ae2df1758"
+    },
+    {
+      "id": "8694",
+      "url": "https://www.gutenberg.org/cache/epub/8694/pg8694.txt",
+      "title": "The Abbot's Ghost, or Maurice Treherne's Temptation: A Christmas Story",
+      "author": "Louisa May Alcott",
+      "language": "English",
+      "raw_sha256": "e3c50a7a900068e05e88c608d7ebc010d8d2245aa8edeca9d8561389de9b97ff",
+      "body_sha256": "abfc5c9d8dd75b1263a1b4754552cd547122d290f6cd1aea77c0c1f02cc46ee7"
+    },
+    {
+      "id": "9179",
+      "url": "https://www.gutenberg.org/cache/epub/9179/pg9179.txt",
+      "title": "The Bride of the Mistletoe",
+      "author": "James Lane Allen",
+      "language": "English",
+      "raw_sha256": "41f1041705a53f63a120797b8f1c699fb720189abe4babd92602e31ce5a2a750",
+      "body_sha256": "bb015e4f585a943e1f42cda7b279b9da1adc3655379bc203b7492fca46ad6363"
+    }
+  ],
+  "pending_anthologies": [
+    {
+      "source_id": "35397",
+      "title": "Christmas Stories",
+      "body_sha256": "698516d9003aeda7a6bf2ac693b110365e6f547f722b4eedecca60718b231294",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "28307",
+      "title": "A Christmas Accident and Other Stories",
+      "body_sha256": "1c46b1488df37209cec750cf9029b958165261336a0475ae8e6984fd01f72737",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "28198",
+      "title": "A Budget of Christmas Tales by Charles Dickens and Others",
+      "body_sha256": "a4454515cc23e59ce1001beb0ec2e226b3af600451d398edf678c229c82c4fc8",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "20425",
+      "title": "The Peace Egg and Other tales",
+      "body_sha256": "bab6484443af1be60aec42e82ead24e1969714b8b23f00d1a39f49c7d12eb9c4",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "43763",
+      "title": "Snap-Dragons; Old Father Christmas",
+      "body_sha256": "57f0cce922b84ca509f2ab0dd7c444544a6b291040d33daf57dea51dd56f22b4",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "17770",
+      "title": "Christmas Stories And Legends",
+      "body_sha256": "621fe03b3c7b45d9d6b50637b1dcbb9842f1fceedd4450c5148127ada2e3311e",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "48747",
+      "title": "Who Ate the Pink Sweetmeat? And Other Christmas Stories",
+      "body_sha256": "abc3b0e9c8ecd0ec7b887ce9c9cad0daea5b52e086bfc775bf95f39b22910439",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "71698",
+      "title": "Christmas at Cedar Hill A holiday story-book",
+      "body_sha256": "efc55c812133e9c74b863d929ad0550567cb7bf6fb70d7e1eee4581f0dc3722e",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "58409",
+      "title": "Cossack Tales",
+      "body_sha256": "8cad77fb6c2ff3edfdf9e4f7dc66ad75b24cc91632c14fa3fd384de5945f93ed",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "54803",
+      "title": "Playing Santa Claus, and Other Christmas Tales",
+      "body_sha256": "83d2e7ac4b9ff8f88b38d725c300ee0f0258b20d8e0f94ba8bc376757d03894b",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "79846",
+      "title": "The written leaves A story of the new year and other holiday stories",
+      "body_sha256": "1ec1a782df11a6c2f019933a1a4df5f7d3a8b898fc97b3cb100dca377de9a7d0",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "34571",
+      "title": "The Pearl Story Book: Stories and Legends of Winter, Christmas, and New Year's Day",
+      "body_sha256": "47af1fa0094c850cd4cd8fdc6422830a220bbf31652a27943e1e70c12dfe90ca",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "28098",
+      "title": "Holiday Tales: Christmas in the Adirondacks",
+      "body_sha256": "92215c3497deeca64ac556ee9fc6a1da0ef6b47ad97451bc01d3cfcca0d06011",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "47333",
+      "title": "Christmas Stories from French and Spanish Writers",
+      "body_sha256": "81778dbe116ddb81c80936dda0ad25065ea5309a6957b6ca639349d1ee1fd46e",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "69416",
+      "title": "Christmas stories",
+      "body_sha256": "18336e2071ec4a986cad8a29d968c55ce0f162fb4e955fdd0808cb626ea9b36e",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "70291",
+      "title": "X-mas sketches from the Dartmouth Literary Monthly",
+      "body_sha256": "b9ae34d9c95c076be2bef4e2df1e2e2a07f01b4ad6907c563eba79250f4ff9c1",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "16052",
+      "title": "The Brownies and Other Tales",
+      "body_sha256": "01d6a29d2899f5ad78da22314042cba667b0a1d9547dc901e3b1306831b93084",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "43190",
+      "title": "Blade-O'-Grass. Golden Grain. and Bread and Cheese and Kisses.",
+      "body_sha256": "46da15a7a5169c10471cf552627f939518b1d8c1b543504a05d907dddce19716",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "31103",
+      "title": "A Christmas Greeting: A Series of Stories",
+      "body_sha256": "317414a7c83e9305a3cc3425b0636b5a7fd58d872ad3a6e2610e378e31bdf43e",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "2731",
+      "title": "The Christmas Books of Mr. M.A. Titmarsh",
+      "body_sha256": "ebdf251d631628eede1e0ea9d3f97302a23f853fb13a054b3027bbe1a92b9667",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "1467",
+      "title": "Some Christmas Stories",
+      "body_sha256": "b69cb9535c7802245358c6b6b08da850b20117d2ea606a3fdaed6f5c60f4a3b8",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "47897",
+      "title": "The yule log a series of stories for the young",
+      "body_sha256": "47548197d28cc2c28e23944189d5059b516b465be3df96d9fc02c766951694a7",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "10723",
+      "title": "Betty's Bright Idea; Deacon Pitkin's Farm; and the First Christmas of New England",
+      "body_sha256": "b1232b11e3f4c0a507fcb75c4898a82652e6a1a90e929897712bae7fd4e0e93b",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "27741",
+      "title": "Colonel Carter's Christmas and The Romance of an Old-Fashioned Gentleman",
+      "body_sha256": "b7cb2654eb30b36ad91ebc133715e001a58370a1129ec0c82da33aaab41638d5",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "20018",
+      "title": "Evenings at Donaldson Manor; Or, The Christmas Guest",
+      "body_sha256": "1c8dab57cd071a8bc76103097a65c0915172f513d46e139db841093223dd641a",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "34665",
+      "title": "Christmas Penny Readings: Original Sketches for the Season",
+      "body_sha256": "f9a7355965f47521df8c87d1e03635c67b50e560575ebb47a62b65e7910fd568",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "71907",
+      "title": "Arthur Glyn and other stories",
+      "body_sha256": "1658c64b09a773d8ed7a1ed8e7a9550234089399157b1b27ca0f72cafeca58e3",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    },
+    {
+      "source_id": "65830",
+      "title": "Two Christmas Stories: Sam Franklin's Savings-Bank; A Miserable Christmas and a Happy New Year",
+      "body_sha256": "d0d85e7c6b6bd08e809383b648c784fe4813292d4edcb58c25eb1057481a02cd",
+      "reason": "Needs explicit constituent-story boundaries; omitted from training"
+    }
+  ],
+  "note": "Source editions only. Build narrative ranges with build_story_catalog.py and story_boundaries.json; this snapshot cannot be trained directly."
+}
